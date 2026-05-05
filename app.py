@@ -261,37 +261,51 @@ with tab_upload:
                 if not entries:
                     st.warning("⚠️  No clear property Q&A found in this file. Try a file with more specific property details like emails from suppliers.")
                 else:
-                    st.success(f"✅  Found **{len(entries)} pieces of information** to save!")
-                    st.markdown("---")
-                    st.markdown("**Review below — then click Save All:**")
-                    valid_entries = []
-                    for entry in entries:
-                        prop = entry.get("property_name","").strip()
-                        q    = entry.get("question","").strip()
-                        ans  = entry.get("answer","").strip()
-                        vhc  = entry.get("vhc_id","").strip()
-                        if prop and q and ans:
-                            with st.expander(f"🏠  {prop}  |  {q[:70]}"):
-                                c1, c2 = st.columns(2)
-                                with c1:
-                                    st.markdown(f"**Property:** {prop}")
-                                    if vhc: st.markdown(f"**VHC ID:** {vhc}")
-                                with c2:
-                                    st.markdown(f"**Category:** {categorize(q)}")
-                                st.markdown(f"**Q:** {q}")
-                                st.markdown(f"**A:** {ans}")
-                            valid_entries.append(entry)
-                    st.markdown("---")
-                    if st.button(f"💾  Save All {len(valid_entries)} Entries", type="primary"):
-                        saved = 0
-                        for entry in valid_entries:
-                            try:
-                                save_entry(entry.get("vhc_id",""), entry.get("property_name",""), entry.get("question",""), entry.get("answer",""), f"File: {uploaded_file.name}", upload_by)
-                                saved += 1
-                            except Exception as e:
-                                st.error(f"Error saving entry: {e}")
-                        st.success(f"🎉  Saved {saved} entries!")
-                        st.balloons()
+                    valid = [e for e in entries if e.get("property_name","").strip() and e.get("question","").strip() and e.get("answer","").strip()]
+                    st.session_state["extracted_entries"]  = valid
+                    st.session_state["extracted_filename"] = uploaded_file.name
+
+    if st.session_state.get("extracted_entries"):
+        valid         = st.session_state["extracted_entries"]
+        filename      = st.session_state.get("extracted_filename","uploaded file")
+        st.success(f"✅  Found **{len(valid)} pieces of information** to save!")
+        st.markdown("---")
+        st.markdown("**Review below — then click Save All:**")
+        for entry in valid:
+            prop = entry.get("property_name","").strip()
+            q    = entry.get("question","").strip()
+            ans  = entry.get("answer","").strip()
+            vhc  = entry.get("vhc_id","").strip()
+            with st.expander(f"🏠  {prop}  |  {q[:70]}"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown(f"**Property:** {prop}")
+                    if vhc: st.markdown(f"**VHC ID:** {vhc}")
+                with c2:
+                    st.markdown(f"**Category:** {categorize(q)}")
+                st.markdown(f"**Q:** {q}")
+                st.markdown(f"**A:** {ans}")
+        st.markdown("---")
+        if st.button(f"💾  Save All {len(valid)} Entries to Knowledge Base", type="primary"):
+            saved = 0
+            for entry in valid:
+                try:
+                    save_entry(
+                        entry.get("vhc_id",""),
+                        entry.get("property_name",""),
+                        entry.get("question",""),
+                        entry.get("answer",""),
+                        f"File: {filename}",
+                        upload_by or "Team"
+                    )
+                    saved += 1
+                except Exception as e:
+                    st.error(f"Error saving entry: {e}")
+            st.success(f"🎉  Saved {saved} entries to your knowledge base!")
+            st.session_state["extracted_entries"]  = []
+            st.session_state["extracted_filename"] = ""
+            st.balloons()
+
     elif uploaded_file and not upload_by:
         st.warning("Please enter your name before analyzing.")
 
