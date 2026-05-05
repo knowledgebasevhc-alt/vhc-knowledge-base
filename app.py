@@ -462,6 +462,20 @@ with tab_suppliers:
 # ══════════════════════════════════════════════════════════════════════════════
 # VIEW / EDIT ALL
 # ══════════════════════════════════════════════════════════════════════════════
+BADGE_COLORS = [
+    ("background:#E6F1FB;color:#0C447C","background:#E6F1FB;color:#0C447C"),
+    ("background:#E1F5EE;color:#085041","background:#E1F5EE;color:#085041"),
+    ("background:#FAEEDA;color:#633806","background:#FAEEDA;color:#633806"),
+    ("background:#FAECE7;color:#4A1B0C","background:#FAECE7;color:#4A1B0C"),
+    ("background:#EEEDFE;color:#26215C","background:#EEEDFE;color:#26215C"),
+    ("background:#FBEAF0;color:#4B1528","background:#FBEAF0;color:#4B1528"),
+    ("background:#EAF3DE;color:#173404","background:#EAF3DE;color:#173404"),
+]
+
+def supplier_badge_style(name: str) -> str:
+    idx = hash(name or "") % len(BADGE_COLORS)
+    return BADGE_COLORS[idx][0]
+
 with tab_view:
     st.subheader("All Knowledge Base Entries")
 
@@ -470,10 +484,10 @@ with tab_view:
     with c1:
         f_supplier = st.selectbox("Filter by supplier", ["All"] + supplier_names)
     with c2:
-        f_cat      = st.selectbox("Filter by category",
-                        ["All","Pet Policy","Pool","Accessibility","Parking","Bedding","Fees","Other"])
+        f_cat = st.selectbox("Filter by category",
+                    ["All","Pet Policy","Pool","Accessibility","Parking","Bedding","Fees","Other"])
     with c3:
-        f_prop     = st.text_input("Search by property name", placeholder="Type to filter...")
+        f_prop = st.text_input("Search by property name", placeholder="Type to filter...")
 
     if st.button("🔄  Refresh"):
         st.rerun()
@@ -492,66 +506,83 @@ with tab_view:
     if not rows:
         st.info("No entries yet. Start by adding a supplier, then upload a file or add entries manually!")
     else:
-        for row in rows:
-            sup_label = f" [{row.get('supplier_name','')}]" if row.get('supplier_name') else ""
-            with st.expander(f"🏠{sup_label}  {row.get('property_name','Unknown')}  |  {row.get('question','')[:60]}"):
-                # Toggle edit mode per row
-                edit_key = f"edit_mode_{row['id']}"
-                if edit_key not in st.session_state:
-                    st.session_state[edit_key] = False
+        # Table header
+        h1, h2, h3, h4, h5 = st.columns([2, 3, 3, 1.2, 1.2])
+        with h1: st.markdown("<span style='font-size:12px;color:var(--color-text-secondary);font-weight:500;'>SUPPLIER</span>", unsafe_allow_html=True)
+        with h2: st.markdown("<span style='font-size:12px;color:var(--color-text-secondary);font-weight:500;'>PROPERTY</span>", unsafe_allow_html=True)
+        with h3: st.markdown("<span style='font-size:12px;color:var(--color-text-secondary);font-weight:500;'>QUESTION</span>", unsafe_allow_html=True)
+        with h4: st.markdown("<span style='font-size:12px;color:var(--color-text-secondary);font-weight:500;'>CATEGORY</span>", unsafe_allow_html=True)
+        with h5: st.markdown("<span style='font-size:12px;color:var(--color-text-secondary);font-weight:500;'>ACTIONS</span>", unsafe_allow_html=True)
+        st.markdown("<hr style='margin:4px 0 8px 0;border:none;border-top:0.5px solid var(--color-border-tertiary);'>", unsafe_allow_html=True)
 
-                if not st.session_state[edit_key]:
-                    # VIEW MODE
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.markdown(f"**Supplier:** {row.get('supplier_name') or '—'}")
-                        st.markdown(f"**VHC ID:** {row.get('vhc_id') or '—'}")
-                        st.markdown(f"**Category:** {row.get('question_category','—')}")
-                    with c2:
-                        st.markdown(f"**Source:** {row.get('source','—')}")
-                        st.markdown(f"**Added by:** {row.get('added_by','—')}")
-                        st.markdown(f"**Date:** {(row.get('created_at') or '')[:10] or '—'}")
-                    st.markdown(f"**Question:** {row.get('question','—')}")
-                    st.markdown(f"**Answer:** {row.get('answer','—')}")
+        for row in rows:
+            edit_key = f"edit_mode_{row['id']}"
+            if edit_key not in st.session_state:
+                st.session_state[edit_key] = False
+
+            if not st.session_state[edit_key]:
+                # ── TABLE ROW ──
+                sup   = row.get("supplier_name","") or ""
+                style = supplier_badge_style(sup)
+                cat   = row.get("question_category","") or "Other"
+                vhc   = row.get("vhc_id","") or ""
+
+                r1, r2, r3, r4, r5 = st.columns([2, 3, 3, 1.2, 1.2])
+                with r1:
+                    if sup:
+                        st.markdown(f"<span style='display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:500;{style}'>{sup}</span>", unsafe_allow_html=True)
+                    else:
+                        st.markdown("<span style='color:var(--color-text-secondary);font-size:12px;'>—</span>", unsafe_allow_html=True)
+                with r2:
+                    prop_short = (row.get("property_name","") or "")[:45]
+                    vhc_txt    = f"<br><span style='font-size:11px;color:var(--color-text-secondary);'>VHC: {vhc}</span>" if vhc else ""
+                    st.markdown(f"<span style='font-size:13px;font-weight:500;'>{prop_short}</span>{vhc_txt}", unsafe_allow_html=True)
+                with r3:
+                    q_short = (row.get("question","") or "")[:65]
+                    st.markdown(f"<span style='font-size:13px;color:var(--color-text-secondary);'>{q_short}</span>", unsafe_allow_html=True)
+                with r4:
+                    st.markdown(f"<span style='display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;background:var(--color-background-secondary);color:var(--color-text-secondary);'>{cat}</span>", unsafe_allow_html=True)
+                with r5:
                     bc1, bc2 = st.columns(2)
                     with bc1:
-                        if st.button("✏️  Edit", key=f"editbtn_{row['id']}"):
+                        if st.button("✏️", key=f"editbtn_{row['id']}", help="Edit this entry"):
                             st.session_state[edit_key] = True
                             st.rerun()
                     with bc2:
-                        if st.button("🗑️  Delete", key=f"del_{row['id']}"):
+                        if st.button("🗑️", key=f"del_{row['id']}", help="Delete this entry"):
                             delete_entry(row["id"])
-                            st.success("Deleted.")
                             st.rerun()
-                else:
-                    # EDIT MODE
-                    st.markdown("**✏️ Editing this entry:**")
+
+                st.markdown("<hr style='margin:2px 0;border:none;border-top:0.5px solid var(--color-border-tertiary);'>", unsafe_allow_html=True)
+
+            else:
+                # ── EDIT FORM (inline below the row) ──
+                with st.container():
+                    st.markdown(f"<div style='background:var(--color-background-secondary);border-radius:8px;padding:12px 16px;margin:4px 0;'>", unsafe_allow_html=True)
+                    st.markdown(f"**✏️ Editing: {(row.get('property_name','') or '')[:50]}**")
                     all_suppliers = get_supplier_names()
-                    cur_sup = row.get("supplier_name","")
-                    sup_options = ["— Select —"] + all_suppliers + ["+ Type new supplier"]
-                    cur_sup_idx = sup_options.index(cur_sup) if cur_sup in sup_options else 0
+                    cur_sup       = row.get("supplier_name","")
+                    sup_options   = ["— Select —"] + all_suppliers + ["+ Type new supplier"]
+                    cur_idx       = sup_options.index(cur_sup) if cur_sup in sup_options else 0
 
                     ec1, ec2 = st.columns(2)
                     with ec1:
-                        e_sup = st.selectbox("Supplier", sup_options,
-                                             index=cur_sup_idx, key=f"e_sup_{row['id']}")
+                        e_sup = st.selectbox("Supplier", sup_options, index=cur_idx, key=f"e_sup_{row['id']}")
                         if e_sup == "+ Type new supplier":
                             e_sup = st.text_input("Type supplier name:", key=f"e_sup_txt_{row['id']}")
-                        e_vhc  = st.text_input("VHC ID",        value=row.get("vhc_id",""),   key=f"e_vhc_{row['id']}")
-                        e_prop = st.text_input("Property Name", value=row.get("property_name",""), key=f"e_prop_{row['id']}")
-                        e_q    = st.text_input("Question",      value=row.get("question",""),  key=f"e_q_{row['id']}")
+                        e_vhc  = st.text_input("VHC ID",        value=row.get("vhc_id",""),          key=f"e_vhc_{row['id']}")
+                        e_prop = st.text_input("Property Name", value=row.get("property_name",""),    key=f"e_prop_{row['id']}")
+                        e_q    = st.text_input("Question",      value=row.get("question",""),         key=f"e_q_{row['id']}")
                     with ec2:
-                        e_ans  = st.text_area("Answer", value=row.get("answer",""), height=120, key=f"e_ans_{row['id']}")
-                        e_src  = st.selectbox("Source",
-                                    ["Supplier email","Supplier phone call","Supplier website","Airbnb / VRBO listing","Other"],
-                                    index=["Supplier email","Supplier phone call","Supplier website","Airbnb / VRBO listing","Other"].index(row.get("source","Other")) if row.get("source","Other") in ["Supplier email","Supplier phone call","Supplier website","Airbnb / VRBO listing","Other"] else 0,
-                                    key=f"e_src_{row['id']}")
-                        e_by   = st.text_input("Updated by", value=row.get("added_by",""), key=f"e_by_{row['id']}")
+                        e_ans = st.text_area("Answer", value=row.get("answer",""), height=120,        key=f"e_ans_{row['id']}")
+                        src_opts = ["Supplier email","Supplier phone call","Supplier website","Airbnb / VRBO listing","Other"]
+                        src_idx  = src_opts.index(row.get("source","Other")) if row.get("source","Other") in src_opts else 0
+                        e_src = st.selectbox("Source", src_opts, index=src_idx,                      key=f"e_src_{row['id']}")
+                        e_by  = st.text_input("Updated by", value=row.get("added_by",""),             key=f"e_by_{row['id']}")
 
                     sc1, sc2 = st.columns(2)
                     with sc1:
                         if st.button("💾  Save Changes", type="primary", key=f"save_edit_{row['id']}"):
-                            # Auto-save supplier if new
                             if e_sup and e_sup not in ["— Select —",""]:
                                 existing = get_supplier_names()
                                 if e_sup.strip() not in existing:
@@ -571,9 +602,11 @@ with tab_view:
                                 "updated_at":        datetime.utcnow().isoformat()
                             }).eq("id", row["id"]).execute()
                             st.session_state[edit_key] = False
-                            st.success("✅  Entry updated!")
+                            st.success("✅  Updated!")
                             st.rerun()
                     with sc2:
                         if st.button("✖️  Cancel", key=f"cancel_edit_{row['id']}"):
                             st.session_state[edit_key] = False
                             st.rerun()
+                    st.markdown("</div>", unsafe_allow_html=True)
+                    st.markdown("<hr style='margin:2px 0;border:none;border-top:0.5px solid var(--color-border-tertiary);'>", unsafe_allow_html=True)
