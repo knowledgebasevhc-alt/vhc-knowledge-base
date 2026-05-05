@@ -392,6 +392,13 @@ with tab_add:
 
     if st.button("✅  Save to Knowledge Base", type="primary"):
         if na_prop and na_q and na_ans and na_by and na_supplier not in ["— Select a supplier —",""]:
+            # Auto-save to suppliers table if new
+            existing = [s["name"] for s in get_suppliers()]
+            if na_supplier.strip() not in existing:
+                try:
+                    supabase.table("suppliers").insert({"name": na_supplier.strip(), "website": ""}).execute()
+                except:
+                    pass
             save_entry(na_vhc, na_prop, na_q, na_ans, na_src, na_by, na_supplier)
             st.success(f"✅  Saved for **{na_supplier}**!")
             st.balloons()
@@ -488,18 +495,85 @@ with tab_view:
         for row in rows:
             sup_label = f" [{row.get('supplier_name','')}]" if row.get('supplier_name') else ""
             with st.expander(f"🏠{sup_label}  {row.get('property_name','Unknown')}  |  {row.get('question','')[:60]}"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.markdown(f"**Supplier:** {row.get('supplier_name') or '—'}")
-                    st.markdown(f"**VHC ID:** {row.get('vhc_id') or '—'}")
-                    st.markdown(f"**Category:** {row.get('question_category','—')}")
-                with c2:
-                    st.markdown(f"**Source:** {row.get('source','—')}")
-                    st.markdown(f"**Added by:** {row.get('added_by','—')}")
-                    st.markdown(f"**Date:** {(row.get('created_at') or '')[:10] or '—'}")
-                st.markdown(f"**Question:** {row.get('question','—')}")
-                st.markdown(f"**Answer:** {row.get('answer','—')}")
-                if st.button("🗑️  Delete", key=f"del_{row['id']}"):
-                    delete_entry(row["id"])
-                    st.success("Deleted.")
-                    st.rerun()
+                # Toggle edit mode per row
+                edit_key = f"edit_mode_{row['id']}"
+                if edit_key not in st.session_state:
+                    st.session_state[edit_key] = False
+
+                if not st.session_state[edit_key]:
+                    # VIEW MODE
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.markdown(f"**Supplier:** {row.get('supplier_name') or '—'}")
+                        st.markdown(f"**VHC ID:** {row.get('vhc_id') or '—'}")
+                        st.markdown(f"**Category:** {row.get('question_category','—')}")
+                    with c2:
+                        st.markdown(f"**Source:** {row.get('source','—')}")
+                        st.markdown(f"**Added by:** {row.get('added_by','—')}")
+                        st.markdown(f"**Date:** {(row.get('created_at') or '')[:10] or '—'}")
+                    st.markdown(f"**Question:** {row.get('question','—')}")
+                    st.markdown(f"**Answer:** {row.get('answer','—')}")
+                    bc1, bc2 = st.columns(2)
+                    with bc1:
+                        if st.button("✏️  Edit", key=f"editbtn_{row['id']}"):
+                            st.session_state[edit_key] = True
+                            st.rerun()
+                    with bc2:
+                        if st.button("🗑️  Delete", key=f"del_{row['id']}"):
+                            delete_entry(row["id"])
+                            st.success("Deleted.")
+                            st.rerun()
+                else:
+                    # EDIT MODE
+                    st.markdown("**✏️ Editing this entry:**")
+                    all_suppliers = get_supplier_names()
+                    cur_sup = row.get("supplier_name","")
+                    sup_options = ["— Select —"] + all_suppliers + ["+ Type new supplier"]
+                    cur_sup_idx = sup_options.index(cur_sup) if cur_sup in sup_options else 0
+
+                    ec1, ec2 = st.columns(2)
+                    with ec1:
+                        e_sup = st.selectbox("Supplier", sup_options,
+                                             index=cur_sup_idx, key=f"e_sup_{row['id']}")
+                        if e_sup == "+ Type new supplier":
+                            e_sup = st.text_input("Type supplier name:", key=f"e_sup_txt_{row['id']}")
+                        e_vhc  = st.text_input("VHC ID",        value=row.get("vhc_id",""),   key=f"e_vhc_{row['id']}")
+                        e_prop = st.text_input("Property Name", value=row.get("property_name",""), key=f"e_prop_{row['id']}")
+                        e_q    = st.text_input("Question",      value=row.get("question",""),  key=f"e_q_{row['id']}")
+                    with ec2:
+                        e_ans  = st.text_area("Answer", value=row.get("answer",""), height=120, key=f"e_ans_{row['id']}")
+                        e_src  = st.selectbox("Source",
+                                    ["Supplier email","Supplier phone call","Supplier website","Airbnb / VRBO listing","Other"],
+                                    index=["Supplier email","Supplier phone call","Supplier website","Airbnb / VRBO listing","Other"].index(row.get("source","Other")) if row.get("source","Other") in ["Supplier email","Supplier phone call","Supplier website","Airbnb / VRBO listing","Other"] else 0,
+                                    key=f"e_src_{row['id']}")
+                        e_by   = st.text_input("Updated by", value=row.get("added_by",""), key=f"e_by_{row['id']}")
+
+                    sc1, sc2 = st.columns(2)
+                    with sc1:
+                        if st.button("💾  Save Changes", type="primary", key=f"save_edit_{row['id']}"):
+                            # Auto-save supplier if new
+                            if e_sup and e_sup not in ["— Select —",""]:
+                                existing = get_supplier_names()
+                                if e_sup.strip() not in existing:
+                                    try:
+                                        supabase.table("suppliers").insert({"name": e_sup.strip(), "website": ""}).execute()
+                                    except:
+                                        pass
+                            supabase.table("knowledge_base").update({
+                                "supplier_name":     e_sup if e_sup not in ["— Select —",""] else "",
+                                "vhc_id":            e_vhc,
+                                "property_name":     e_prop,
+                                "question":          e_q,
+                                "question_category": categorize(e_q),
+                                "answer":            e_ans,
+                                "source":            e_src,
+                                "added_by":          e_by,
+                                "updated_at":        datetime.utcnow().isoformat()
+                            }).eq("id", row["id"]).execute()
+                            st.session_state[edit_key] = False
+                            st.success("✅  Entry updated!")
+                            st.rerun()
+                    with sc2:
+                        if st.button("✖️  Cancel", key=f"cancel_edit_{row['id']}"):
+                            st.session_state[edit_key] = False
+                            st.rerun()
