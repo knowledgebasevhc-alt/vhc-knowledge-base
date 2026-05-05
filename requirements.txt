@@ -3,3 +3,6 @@ google-generativeai
 supabase
 requests
 beautifulsoup4
+pandas
+pypdf
+python-docx
