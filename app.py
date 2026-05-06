@@ -171,6 +171,15 @@ def read_bytes(raw: bytes, fname: str) -> str:
     n = fname.lower()
     if n.endswith(".csv"):
         return pd.read_csv(io.BytesIO(raw)).to_string(index=False)
+    elif n.endswith((".xlsx",".xls")):
+        try:
+            df = pd.read_excel(io.BytesIO(raw), sheet_name=None)
+            parts = []
+            for sheet, data in df.items():
+                parts.append(f"--- Sheet: {sheet} ---")
+                parts.append(data.to_string(index=False))
+            return "\n".join(parts)
+        except Exception as e: return f"ERROR reading Excel: {e}"
     elif n.endswith((".txt",".md")):
         return raw.decode("utf-8", errors="ignore")
     elif n.endswith(".pdf"):
@@ -187,7 +196,7 @@ def read_bytes(raw: bytes, fname: str) -> str:
         try: return raw.decode("utf-8", errors="ignore")
         except: return "ERROR: Unreadable file."
 
-def extract_entries(content: str) -> list:
+def extract_entries_from_chunk(chunk: str) -> list:
     prompt = f"""You are analyzing vacation rental property data.
 Extract every useful piece of property information and return a JSON array.
 Each item must have:
@@ -196,16 +205,51 @@ Each item must have:
 - "unit_label": unit number/label if present, else ""
 - "question": a clear question this info answers (required)
 - "answer": the answer (required)
-Only include confident entries. No guessing. Return ONLY raw JSON array, no backticks.
+Only include entries where BOTH question and answer are clearly present.
+Do not invent or guess. Return ONLY a raw JSON array, no backticks, no explanation.
 Text:
-{content[:7000]}"""
+{chunk}"""
     try:
         r = ask_ai(prompt).strip().replace("```json","").replace("```","").strip()
         s, e = r.find("["), r.rfind("]")+1
         return json.loads(r[s:e]) if s>=0 and e>0 else []
-    except Exception as ex:
-        st.error(f"AI parse error: {ex}")
+    except:
         return []
+
+def extract_entries(content: str) -> list:
+    CHUNK_SIZE  = 6000
+    OVERLAP     = 200
+    all_entries = []
+    seen_keys   = set()
+
+    # Split into overlapping chunks
+    chunks = []
+    start  = 0
+    while start < len(content):
+        end = start + CHUNK_SIZE
+        chunks.append(content[start:end])
+        start = end - OVERLAP
+        if start >= len(content):
+            break
+
+    total = len(chunks)
+    prog  = st.progress(0, text=f"Processing chunk 1 of {total}...")
+
+    for i, chunk in enumerate(chunks):
+        prog.progress((i+1)/total, text=f"Processing chunk {i+1} of {total}...")
+        entries = extract_entries_from_chunk(chunk)
+        for e in entries:
+            prop = (e.get("property_name","") or "").strip()
+            q    = (e.get("question","") or "").strip()
+            if not prop or not q:
+                continue
+            key = (prop.lower(), q.lower())
+            if key not in seen_keys:
+                seen_keys.add(key)
+                all_entries.append(e)
+
+    prog.empty()
+    return all_entries
 
 def scrape(url: str, query: str) -> str:
     try:
@@ -428,7 +472,7 @@ with tab_upload:
         st.warning("⚠️  No suppliers yet. Go to Suppliers tab first.")
     else:
         up_sup  = st.selectbox("Which supplier does this file belong to? *", ["— Select —"] + sup_names)
-        up_file = st.file_uploader("Choose a file", type=["csv","txt","pdf","docx","md"])
+        up_file = st.file_uploader("Choose a file", type=["csv","xlsx","xls","txt","pdf","docx","md"])
         up_by   = st.text_input("Your name *", placeholder="e.g. Maria", key="up_by")
 
         if up_file and up_by and up_sup != "— Select —":
