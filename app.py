@@ -548,10 +548,14 @@ with tab_view:
         with ba1:
             if st.button("☑️  Select all"):
                 st.session_state["selected_ids"] = {r["id"] for r in rows}
+                for r in rows:
+                    st.session_state[f"chk_{r['id']}"] = True
                 st.rerun()
         with ba2:
             if st.button("⬜  Clear selection"):
                 st.session_state["selected_ids"] = set()
+                for r in rows:
+                    st.session_state[f"chk_{r['id']}"] = False
                 st.rerun()
         with ba3:
             if sel_count:
