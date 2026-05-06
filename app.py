@@ -735,50 +735,125 @@ with tab_view:
 
             else:
                 # ── EDIT FORM ──
-                st.markdown(f"**✏️  Editing: {(row.get('property_name','') or '')[:50]}**")
+                st.markdown(f"**✏️  Editing: {row.get('property_name','') or ''}**")
                 all_sups = get_supplier_names()
                 cur_sup  = row.get("supplier_name","")
                 sup_opts = ["— Select —"] + all_sups + ["+ Type new supplier"]
                 cur_idx  = sup_opts.index(cur_sup) if cur_sup in sup_opts else 0
-                ec1,ec2  = st.columns(2)
-                with ec1:
+                # ── Property details ──
+                ed1, ed2 = st.columns(2)
+                with ed1:
                     e_sup  = st.selectbox("Supplier", sup_opts, index=cur_idx, key=f"e_sup_{eid}")
                     if e_sup == "+ Type new supplier":
                         e_sup = st.text_input("Type supplier name:", key=f"e_sup_txt_{eid}")
-                    e_vhc  = st.text_input("VHC ID",        value=row.get("vhc_id",""),       key=f"e_vhc_{eid}")
-                    e_unit = st.text_input("Unit Label",    value=row.get("unit_label",""),    key=f"e_unit_{eid}")
-                    e_prop = st.text_input("Property Name", value=row.get("property_name",""), key=f"e_prop_{eid}")
-                    e_q    = st.text_input("Question",      value=row.get("question",""),      key=f"e_q_{eid}")
+                    e_vhc      = st.text_input("VHC ID",          value=row.get("vhc_id",""),       key=f"e_vhc_{eid}")
+                    e_unit     = st.text_input("Unit Label",       value=row.get("unit_label",""),    key=f"e_unit_{eid}")
+                    e_prop     = st.text_input("Property Name",    value=row.get("property_name",""), key=f"e_prop_{eid}")
                     e_sup_url  = st.text_input("🔗 Supplier property URL", value=row.get("supplier_url",""),  key=f"e_supurl_{eid}")
                     e_sent_url = st.text_input("🔗 Sentinel URL",          value=row.get("sentinel_url",""),  key=f"e_senturl_{eid}")
-                with ec2:
-                    e_ans  = st.text_area("Answer", value=row.get("answer",""), height=130,    key=f"e_ans_{eid}")
+                with ed2:
                     cur_src = row.get("source","") or ""
                     src_idx = SOURCE_OPTS.index(cur_src) if cur_src in SOURCE_OPTS else len(SOURCE_OPTS)-1
-                    e_src  = st.selectbox("Source", SOURCE_OPTS, index=src_idx,               key=f"e_src_{eid}")
+                    e_src   = st.selectbox("Source", SOURCE_OPTS, index=src_idx, key=f"e_src_{eid}")
                     if e_src == "Other":
                         e_src_detail = st.text_input("Specify source:", key=f"e_src_txt_{eid}")
                     else:
                         e_src_detail = ""
-                    e_by   = st.text_input("Updated by", value=row.get("added_by",""),        key=f"e_by_{eid}")
-                sc1,sc2 = st.columns(2)
+                    e_by = st.text_input("Updated by", value=row.get("added_by",""), key=f"e_by_{eid}")
+
+                st.markdown("---")
+                st.markdown("**Question & Answer**")
+
+                # ── Dynamic Q&A pairs for edit (existing + new) ──
+                epairs_key   = f"edit_pairs_{eid}"
+                ecounter_key = f"edit_counter_{eid}"
+                if epairs_key not in st.session_state:
+                    # Seed with the existing Q&A as pair 0
+                    st.session_state[epairs_key]   = [{"id": 0}]
+                    st.session_state[ecounter_key] = 1
+                    st.session_state[f"eqa_q_0_{eid}"] = row.get("question","") or ""
+                    st.session_state[f"eqa_a_0_{eid}"] = row.get("answer","")   or ""
+
+                e_to_remove = None
+                for ei, ep in enumerate(st.session_state[epairs_key]):
+                    epid = ep["id"]
+                    eqk  = f"eqa_q_{epid}_{eid}"
+                    eak  = f"eqa_a_{epid}_{eid}"
+                    if eqk not in st.session_state: st.session_state[eqk] = ""
+                    if eak not in st.session_state: st.session_state[eak] = ""
+
+                    st.markdown(f"<div style='background:#f8f8f8;border-radius:8px;padding:12px;margin-bottom:8px;'>", unsafe_allow_html=True)
+                    epc1, epc2 = st.columns(2)
+                    with epc1:
+                        st.markdown(f"<div style='font-size:12px;color:gray;margin-bottom:2px;font-weight:500;'>Question {ei+1}</div>", unsafe_allow_html=True)
+                        st.text_area("EQ", placeholder="e.g.  Are pets allowed?",   height=90, key=eqk, label_visibility="collapsed")
+                    with epc2:
+                        st.markdown(f"<div style='font-size:12px;color:gray;margin-bottom:2px;font-weight:500;'>Answer {ei+1}</div>", unsafe_allow_html=True)
+                        st.text_area("EA", placeholder="e.g.  Yes, $150 per stay.", height=90, key=eak, label_visibility="collapsed")
+                    if len(st.session_state[epairs_key]) > 1:
+                        if st.button(f"✕  Remove pair {ei+1}", key=f"erm_{epid}_{eid}"):
+                            e_to_remove = ei
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                if e_to_remove is not None:
+                    removed_ep = st.session_state[epairs_key].pop(e_to_remove)
+                    st.session_state.pop(f"eqa_q_{removed_ep['id']}_{eid}", None)
+                    st.session_state.pop(f"eqa_a_{removed_ep['id']}_{eid}", None)
+                    st.rerun()
+
+                if st.button(f"➕  Add another Q&A pair", key=f"eadd_{eid}"):
+                    ec = st.session_state.get(ecounter_key, 1)
+                    st.session_state[epairs_key].append({"id": ec})
+                    st.session_state[ecounter_key] = ec + 1
+                    st.rerun()
+
+                st.markdown("---")
+                sc1, sc2 = st.columns(2)
                 with sc1:
                     if st.button("💾  Save Changes", type="primary", key=f"save_edit_{eid}"):
                         final_src = e_src_detail.strip() if e_src == "Other" else e_src
                         ensure_supplier(e_sup if e_sup not in ["— Select —",""] else "")
-                        update_entry(eid,{
+                        # Update the original entry with pair 0
+                        ep0   = st.session_state[epairs_key][0]
+                        ep0id = ep0["id"]
+                        e_q   = st.session_state.get(f"eqa_q_{ep0id}_{eid}", "")
+                        e_ans = st.session_state.get(f"eqa_a_{ep0id}_{eid}", "")
+                        update_entry(eid, {
                             "supplier_name": e_sup if e_sup not in ["— Select —",""] else "",
-                            "vhc_id":        e_vhc, "unit_label":    e_unit,
-                            "property_name": e_prop,"question":      e_q,
-                            "answer":        e_ans, "source":        final_src,
-                            "added_by":      e_by,  "supplier_url":  e_sup_url,
+                            "vhc_id":        e_vhc,     "unit_label":   e_unit,
+                            "property_name": e_prop,    "question":     e_q,
+                            "answer":        e_ans,     "source":       final_src,
+                            "added_by":      e_by,      "supplier_url": e_sup_url,
                             "sentinel_url":  e_sent_url,
                         })
+                        # Save any additional pairs as new entries
+                        for ep in st.session_state[epairs_key][1:]:
+                            epid  = ep["id"]
+                            extra_q = st.session_state.get(f"eqa_q_{epid}_{eid}", "").strip()
+                            extra_a = st.session_state.get(f"eqa_a_{epid}_{eid}", "").strip()
+                            if extra_q and extra_a:
+                                save_entry(e_vhc, e_prop, extra_q, extra_a, final_src, e_by,
+                                           e_sup if e_sup not in ["— Select —",""] else "",
+                                           e_unit, e_sup_url, e_sent_url)
+                        # Clean up edit session state
+                        for ep in st.session_state.get(epairs_key, []):
+                            epid = ep["id"]
+                            st.session_state.pop(f"eqa_q_{epid}_{eid}", None)
+                            st.session_state.pop(f"eqa_a_{epid}_{eid}", None)
+                        st.session_state.pop(epairs_key,   None)
+                        st.session_state.pop(ecounter_key, None)
                         st.session_state[edit_key] = False
                         st.success("✅  Updated!")
                         st.rerun()
                 with sc2:
                     if st.button("✖️  Cancel", key=f"cancel_{eid}"):
+                        # Clean up edit session state on cancel
+                        for ep in st.session_state.get(epairs_key, []):
+                            epid = ep["id"]
+                            st.session_state.pop(f"eqa_q_{epid}_{eid}", None)
+                            st.session_state.pop(f"eqa_a_{epid}_{eid}", None)
+                        st.session_state.pop(epairs_key,   None)
+                        st.session_state.pop(ecounter_key, None)
                         st.session_state[edit_key] = False
                         st.rerun()
 
