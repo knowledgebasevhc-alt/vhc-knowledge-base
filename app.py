@@ -58,14 +58,19 @@ def ask_ai(prompt: str) -> str:
 # ── Helpers ────────────────────────────────────────────────────────────────────
 def categorize(question: str) -> str:
     q = question.lower()
-    if "pet" in q:                                              return "Pet Policy"
-    elif "pool" in q or "heat" in q:                           return "Pool"
-    elif "step" in q or "access" in q or "walk" in q \
-         or "handicap" in q or "elderly" in q:                 return "Accessibility"
-    elif "park" in q:                                          return "Parking"
-    elif "bed" in q or "linen" in q or "sleep" in q:          return "Bedding"
-    elif "fee" in q or "cost" in q or "price" in q:           return "Fees"
-    else:                                                      return "Other"
+    if "pet" in q:                                                           return "Pet Policy"
+    elif "pool" in q or "hot tub" in q or "jacuzzi" in q or "spa" in q:    return "Pool"
+    elif "step" in q or "access" in q or "walk" in q          or "handicap" in q or "elderly" in q or "wheelchair" in q:         return "Accessibility"
+    elif "park" in q:                                                        return "Parking"
+    elif "bed" in q or "linen" in q or "sleep" in q or "pillow" in q:      return "Bedding"
+    elif "fee" in q or "cost" in q or "price" in q or "charge" in q:       return "Fees"
+    elif "beach" in q and ("access" in q or "equip" in q or "chair" in q
+         or "umbrella" in q or "gear" in q):                                 return "Beach"
+    elif "wifi" in q or "internet" in q or "wireless" in q:                 return "WiFi"
+    elif "tv" in q or "television" in q or "streaming" in q          or "cable" in q or "smart" in q or "netflix" in q:                 return "TV & Entertainment"
+    elif "grill" in q or "bbq" in q or "barbecue" in q:                    return "Grill"
+    elif "front desk" in q or "concierge" in q or "reception" in q:        return "Front Desk"
+    else:                                                                    return "Other"
 
 def get_suppliers() -> list:
     rows = supabase.table("suppliers").select("*").order("name").execute().data
@@ -80,9 +85,23 @@ def get_supplier_website(name: str) -> str:
         return rows[0]["website"]
     return ""
 
-def save_entry(vhc_id, property_name, question, answer, source, added_by, supplier_name=""):
+def is_duplicate(property_name: str, question: str, vhc_id: str = "") -> bool:
+    existing = supabase.table("knowledge_base").select("id").execute().data
+    all_rows = supabase.table("knowledge_base").select("property_name,question,vhc_id").execute().data
+    prop_lower = (property_name or "").lower().strip()
+    q_lower    = (question or "").lower().strip()
+    for r in all_rows:
+        r_prop = (r.get("property_name","") or "").lower().strip()
+        r_q    = (r.get("question","") or "").lower().strip()
+        r_vhc  = (r.get("vhc_id","") or "").strip()
+        if r_q == q_lower and (r_prop == prop_lower or (vhc_id and r_vhc == vhc_id.strip())):
+            return True
+    return False
+
+def save_entry(vhc_id, property_name, question, answer, source, added_by, supplier_name="", unit_label=""):
     supabase.table("knowledge_base").insert({
         "vhc_id":            vhc_id or "",
+        "unit_label":        unit_label or "",
         "property_name":     property_name,
         "question_category": categorize(question),
         "question":          question,
@@ -138,6 +157,7 @@ Extract every useful piece of property information and return it as a JSON array
 Each item must have these exact fields:
 - "property_name": the property name or address (string, required)
 - "vhc_id": the VHC ID or property ID if mentioned, otherwise empty string
+- "unit_label": the unit label, unit number, or apartment identifier if mentioned, otherwise empty string
 - "question": a clear question this information answers (string, required)
 - "answer": the answer to that question (string, required)
 Rules:
@@ -338,22 +358,31 @@ with tab_upload:
                     st.markdown(f"**A:** {ans}")
             st.markdown("---")
             if st.button(f"💾  Save All {len(valid)} Entries to Knowledge Base", type="primary"):
-                saved = 0
+                saved   = 0
+                skipped = 0
                 for entry in valid:
                     try:
+                        prop = entry.get("property_name","")
+                        q    = entry.get("question","")
+                        vhc  = entry.get("vhc_id","")
+                        if is_duplicate(prop, q, vhc):
+                            skipped += 1
+                            continue
                         save_entry(
-                            entry.get("vhc_id",""),
-                            entry.get("property_name",""),
-                            entry.get("question",""),
+                            vhc, prop, q,
                             entry.get("answer",""),
                             f"File: {filename}",
                             by,
-                            supplier
+                            supplier,
+                            entry.get("unit_label","")
                         )
                         saved += 1
                     except Exception as e:
                         st.error(f"Error saving entry: {e}")
-                st.success(f"🎉  Saved {saved} entries for {supplier}!")
+                msg = f"🎉  Saved {saved} entries for {supplier}!"
+                if skipped:
+                    msg += f" ({skipped} duplicate{'s' if skipped>1 else ''} skipped)"
+                st.success(msg)
                 st.session_state["extracted_entries"]  = []
                 st.session_state["extracted_filename"] = ""
                 st.session_state["extracted_supplier"] = ""
@@ -378,9 +407,10 @@ with tab_add:
                                    key="na_supplier")
         if na_supplier == "+ Other (type below)":
             na_supplier = st.text_input("Type supplier name:", key="na_supplier_custom")
-        na_vhc  = st.text_input("VHC ID", placeholder="e.g.  402129")
-        na_prop = st.text_input("Property Name *", placeholder="e.g.  66 Snapper St, Santa Rosa Beach, FL")
-        na_q    = st.text_input("Question *", placeholder="e.g.  What is the pet fee?")
+        na_vhc   = st.text_input("VHC ID",         placeholder="e.g.  402129")
+        na_unit  = st.text_input("Unit Label",      placeholder="e.g.  Unit 2B / Apt 4 / Villa 3")
+        na_prop  = st.text_input("Property Name *", placeholder="e.g.  66 Snapper St, Santa Rosa Beach, FL")
+        na_q     = st.text_input("Question *",      placeholder="e.g.  What is the pet fee?")
     with c2:
         na_ans  = st.text_area("Answer *",
             placeholder="e.g.  Pet fee is $150 per stay. Max 2 pets. No aggressive breeds.",
@@ -392,16 +422,18 @@ with tab_add:
 
     if st.button("✅  Save to Knowledge Base", type="primary"):
         if na_prop and na_q and na_ans and na_by and na_supplier not in ["— Select a supplier —",""]:
-            # Auto-save to suppliers table if new
-            existing = [s["name"] for s in get_suppliers()]
-            if na_supplier.strip() not in existing:
-                try:
-                    supabase.table("suppliers").insert({"name": na_supplier.strip(), "website": ""}).execute()
-                except:
-                    pass
-            save_entry(na_vhc, na_prop, na_q, na_ans, na_src, na_by, na_supplier)
-            st.success(f"✅  Saved for **{na_supplier}**!")
-            st.balloons()
+            if is_duplicate(na_prop, na_q, na_vhc):
+                st.warning("⚠️  This entry already exists in the knowledge base. Not saved.")
+            else:
+                existing = [s["name"] for s in get_suppliers()]
+                if na_supplier.strip() not in existing:
+                    try:
+                        supabase.table("suppliers").insert({"name": na_supplier.strip(), "website": ""}).execute()
+                    except:
+                        pass
+                save_entry(na_vhc, na_prop, na_q, na_ans, na_src, na_by, na_supplier, na_unit)
+                st.success(f"✅  Saved for **{na_supplier}**!")
+                st.balloons()
         else:
             st.error("Please fill in all required fields including supplier.")
 
@@ -485,7 +517,7 @@ with tab_view:
         f_supplier = st.selectbox("Filter by supplier", ["All"] + supplier_names)
     with c2:
         f_cat = st.selectbox("Filter by category",
-                    ["All","Pet Policy","Pool","Accessibility","Parking","Bedding","Fees","Other"])
+                    ["All","Pet Policy","Pool","Accessibility","Parking","Bedding","Fees","Beach","WiFi","TV & Entertainment","Grill","Front Desk","Other"])
     with c3:
         f_prop = st.text_input("Search by property name", placeholder="Type to filter...")
 
@@ -534,9 +566,13 @@ with tab_view:
                     else:
                         st.markdown("<span style='color:var(--color-text-secondary);font-size:12px;'>—</span>", unsafe_allow_html=True)
                 with r2:
-                    prop_short = (row.get("property_name","") or "")[:45]
-                    vhc_txt    = f"<br><span style='font-size:11px;color:var(--color-text-secondary);'>VHC: {vhc}</span>" if vhc else ""
-                    st.markdown(f"<span style='font-size:13px;font-weight:500;'>{prop_short}</span>{vhc_txt}", unsafe_allow_html=True)
+                    prop_short  = (row.get("property_name","") or "")[:45]
+                    unit_lbl    = row.get("unit_label","") or ""
+                    vhc_txt     = f"VHC: {vhc}" if vhc else ""
+                    unit_txt    = f"Unit: {unit_lbl}" if unit_lbl else ""
+                    sub_parts   = " | ".join(filter(None, [vhc_txt, unit_txt]))
+                    sub_html    = f"<br><span style='font-size:11px;color:var(--color-text-secondary);'>{sub_parts}</span>" if sub_parts else ""
+                    st.markdown(f"<span style='font-size:13px;font-weight:500;'>{prop_short}</span>{sub_html}", unsafe_allow_html=True)
                 with r3:
                     q_short = (row.get("question","") or "")[:65]
                     st.markdown(f"<span style='font-size:13px;color:var(--color-text-secondary);'>{q_short}</span>", unsafe_allow_html=True)
@@ -571,6 +607,7 @@ with tab_view:
                         if e_sup == "+ Type new supplier":
                             e_sup = st.text_input("Type supplier name:", key=f"e_sup_txt_{row['id']}")
                         e_vhc  = st.text_input("VHC ID",        value=row.get("vhc_id",""),          key=f"e_vhc_{row['id']}")
+                        e_unit = st.text_input("Unit Label",    value=row.get("unit_label",""),       key=f"e_unit_{row['id']}")
                         e_prop = st.text_input("Property Name", value=row.get("property_name",""),    key=f"e_prop_{row['id']}")
                         e_q    = st.text_input("Question",      value=row.get("question",""),         key=f"e_q_{row['id']}")
                     with ec2:
@@ -593,6 +630,7 @@ with tab_view:
                             supabase.table("knowledge_base").update({
                                 "supplier_name":     e_sup if e_sup not in ["— Select —",""] else "",
                                 "vhc_id":            e_vhc,
+                                "unit_label":        e_unit,
                                 "property_name":     e_prop,
                                 "question":          e_q,
                                 "question_category": categorize(e_q),
