@@ -293,6 +293,20 @@ with tab_search:
                     meta = json.loads(parts[1].strip())
                 except: pass
 
+            # Try to find the matching row(s) in the database for full detail view
+            all_kb_rows = supabase.table("knowledge_base").select("*").execute().data or []
+            matched_rows = []
+            ans_lower = answer_text.lower()
+            for r in all_kb_rows:
+                rp = (r.get("property_name","") or "").lower()
+                rv = (r.get("vhc_id","") or "").lower()
+                rq = (r.get("question","") or "").lower()
+                ra = (r.get("answer","") or "").lower()
+                qlow = query.lower()
+                if (rv and rv in qlow) or (rp and rp in ans_lower) or                    (ra and ra[:60] in ans_lower) or (rq and rq in ans_lower):
+                    matched_rows.append(r)
+
+            # Show the answer
             st.markdown(f"""
 <div class='green-result'>
   <div class='result-tag'>✓ &nbsp; Answer found</div>
@@ -300,22 +314,75 @@ with tab_search:
 </div>
 """, unsafe_allow_html=True)
 
-            # Meta pills
-            pills = []
-            if meta.get("supplier"):   pills.append(meta["supplier"])
-            if meta.get("added_by"):   pills.append(f"Added by: {meta['added_by']}")
-            if meta.get("source"):     pills.append(f"Source: {meta['source']}")
-            if meta.get("date"):       pills.append(meta["date"][:10])
-            if pills:
-                pill_html = " ".join(f"<span style='display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;border:0.5px solid #ddd;color:gray;margin:2px;'>{p}</span>" for p in pills)
-                st.markdown(pill_html, unsafe_allow_html=True)
+            # If we found matching rows, show full clickable property cards
+            if matched_rows:
+                seen_ids = set()
+                sup_lookup = {s["name"]: s.get("website","") or "" for s in get_suppliers()}
+                for mrow in matched_rows:
+                    if mrow["id"] in seen_ids: continue
+                    seen_ids.add(mrow["id"])
 
-            # Links
-            lc1, lc2, lc3 = st.columns(3)
-            if meta.get("supplier_url"):
-                with lc1: st.link_button("🔗 View on Supplier Website", meta["supplier_url"])
-            if meta.get("sentinel_url"):
-                with lc2: st.link_button("🔗 View in Sentinel", meta["sentinel_url"])
+                    sup      = mrow.get("supplier_name","") or ""
+                    vhc      = mrow.get("vhc_id","") or ""
+                    unit     = mrow.get("unit_label","") or ""
+                    cat      = mrow.get("question_category","") or "Other"
+                    sup_lnk  = mrow.get("supplier_url","") or ""
+                    sent_lnk = mrow.get("sentinel_url","") or ""
+                    sup_main = sup_lookup.get(sup,"")
+                    prop     = mrow.get("property_name","") or ""
+                    q_txt    = mrow.get("question","") or ""
+                    a_txt    = mrow.get("answer","") or ""
+                    src      = mrow.get("source","") or ""
+                    by       = mrow.get("added_by","") or ""
+                    date     = (mrow.get("created_at","") or "")[:10]
+
+                    links_html = ""
+                    if sup_main:  links_html += f"<a href='{sup_main}' target='_blank' style='font-size:13px;margin-right:16px;text-decoration:none;'>🌐 {sup} main website</a>"
+                    if sup_lnk:  links_html += f"<a href='{sup_lnk}'  target='_blank' style='font-size:13px;margin-right:16px;text-decoration:none;'>🔗 View on supplier site</a>"
+                    if sent_lnk: links_html += f"<a href='{sent_lnk}' target='_blank' style='font-size:13px;text-decoration:none;'>🔗 View in Sentinel</a>"
+
+                    sub_parts = " &nbsp;·&nbsp; ".join(filter(None,[
+                        f"VHC: {vhc}"   if vhc  else "",
+                        f"Unit: {unit}" if unit else "",
+                        f"Supplier: {sup}" if sup else "",
+                        cat
+                    ]))
+
+                    st.markdown(f"""
+<div style='background:#f8f9fa;border-left:4px solid #3B6D11;border-radius:0 10px 10px 0;
+     padding:18px 22px;margin:12px 0;cursor:pointer;'>
+  <div style='font-size:16px;font-weight:600;color:#1a1a1a;margin-bottom:6px;'>🏠 {prop}</div>
+  <div style='font-size:12px;color:gray;margin-bottom:12px;'>{sub_parts}</div>
+  <div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:13px;margin-bottom:12px;'>
+    <div><b>Source:</b> {src}</div>
+    <div><b>Added by:</b> {by}</div>
+    <div><b>Date saved:</b> {date}</div>
+  </div>
+  {'<div style="background:white;border-radius:6px;padding:12px;margin-bottom:12px;">'
+   '<div style="font-size:12px;color:gray;font-weight:500;margin-bottom:4px;">QUESTION</div>'
+   '<div style="font-size:14px;margin-bottom:8px;">'+q_txt+'</div>'
+   '<div style="font-size:12px;color:gray;font-weight:500;margin-bottom:4px;">ANSWER</div>'
+   '<div style="font-size:14px;">'+a_txt+'</div>'
+   '</div>' if q_txt else ''}
+  {'<div style="padding-top:10px;border-top:0.5px solid #ddd;">'+links_html+'</div>' if links_html else ''}
+</div>
+""", unsafe_allow_html=True)
+
+            else:
+                # Fallback: show meta pills and links without full card
+                pills = []
+                if meta.get("supplier"):  pills.append(meta["supplier"])
+                if meta.get("added_by"): pills.append(f"Added by: {meta['added_by']}")
+                if meta.get("source"):   pills.append(f"Source: {meta['source']}")
+                if meta.get("date"):     pills.append(meta["date"][:10])
+                if pills:
+                    pill_html = " ".join(f"<span style='display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;border:0.5px solid #ddd;color:gray;margin:2px;'>{p}</span>" for p in pills)
+                    st.markdown(pill_html, unsafe_allow_html=True)
+                lc1,lc2,lc3 = st.columns(3)
+                if meta.get("supplier_url"):
+                    with lc1: st.link_button("🔗 View on Supplier Website", meta["supplier_url"])
+                if meta.get("sentinel_url"):
+                    with lc2: st.link_button("🔗 View in Sentinel", meta["sentinel_url"])
 
             st.markdown("<div class='tip-box'>Not what you were looking for? Go to <strong>Add Entry</strong> to save new information for this property.</div>", unsafe_allow_html=True)
 
@@ -642,7 +709,7 @@ with tab_view:
         h0,h1,h2,h3,h4,h5 = st.columns([0.4,1.8,2.5,3,1.2,1])
         for h,lbl in zip([h0,h1,h2,h3,h4,h5],["","SUPPLIER","PROPERTY","QUESTION / ANSWER","CATEGORY","ACTIONS"]):
             with h: st.markdown(f"<span style='font-size:11px;color:gray;font-weight:600;'>{lbl}</span>", unsafe_allow_html=True)
-        st.markdown("<hr style='margin:4px 0;border:none;border-top:1px solid #eee;'>", unsafe_allow_html=True)
+        st.markdown("<div style='border-top:2px solid #ccc;margin:6px 0 4px 0;'></div>", unsafe_allow_html=True)
 
         for row in rows:
             eid      = row["id"]
@@ -670,34 +737,29 @@ with tab_view:
                     else:   sel.discard(eid)
                 with r1:
                     if sup:
-                        st.markdown(f"<span style='display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:500;{badge_style(sup)}'>{sup}</span>", unsafe_allow_html=True)
+                        short_sup = sup[:18]+"…" if len(sup)>18 else sup
+                        st.markdown(f"<span style='display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500;{badge_style(sup)}'>{short_sup}</span>", unsafe_allow_html=True)
                     else:
-                        st.markdown("<span style='color:gray;font-size:12px;'>—</span>", unsafe_allow_html=True)
+                        st.markdown("<span style='color:#ccc;font-size:11px;'>—</span>", unsafe_allow_html=True)
                 with r2:
                     sub = " | ".join(filter(None,[f"VHC: {vhc}" if vhc else "", f"Unit: {unit}" if unit else ""]))
-                    if st.button(f"🏠 {prop}", key=f"open_btn_{eid}", help="Click to expand full details"):
+                    if st.button(f"🏠 {prop[:35]}{'...' if len(prop)>35 else ''}", key=f"open_btn_{eid}", help=prop):
                         st.session_state[open_key] = not st.session_state[open_key]
                         st.rerun()
-                    if sub: st.markdown(f"<span style='font-size:11px;color:gray;'>{sub}</span>", unsafe_allow_html=True)
-                    # All 3 links always visible
                     sup_main = sup_lookup.get(sup, "")
                     row_links = []
-                    if sup_main:  row_links.append(f"<a href='{sup_main}' target='_blank' style='font-size:11px;'>🌐 Supplier site</a>")
-                    if sup_lnk:  row_links.append(f"<a href='{sup_lnk}'  target='_blank' style='font-size:11px;'>🔗 Property page</a>")
-                    if sent_lnk: row_links.append(f"<a href='{sent_lnk}' target='_blank' style='font-size:11px;'>🔗 Sentinel</a>")
+                    if sub:      row_links.insert(0, f"<span style='font-size:10px;color:gray;'>{sub}</span>")
+                    if sup_main: row_links.append(f"<a href='{sup_main}' target='_blank' style='font-size:10px;'>🌐</a>")
+                    if sup_lnk:  row_links.append(f"<a href='{sup_lnk}'  target='_blank' style='font-size:10px;'>🔗 Prop</a>")
+                    if sent_lnk: row_links.append(f"<a href='{sent_lnk}' target='_blank' style='font-size:10px;'>🔗 Sent</a>")
                     if row_links:
-                        st.markdown(" &nbsp;·&nbsp; ".join(row_links), unsafe_allow_html=True)
+                        st.markdown(" &nbsp;".join(row_links), unsafe_allow_html=True)
                 with r3:
                     if q:
-                        st.markdown(f"<span style='font-size:13px;font-weight:500;'>{q[:70]}</span>", unsafe_allow_html=True)
-                        st.markdown(f"<span style='font-size:12px;color:gray;'>{ans[:100]}{'...' if len(ans)>100 else ''}</span>", unsafe_allow_html=True)
+                        st.markdown(f"<span style='font-size:12px;font-weight:500;line-height:1.3;'>{q[:60]}{'...' if len(q)>60 else ''}</span>", unsafe_allow_html=True)
+                        st.markdown(f"<span style='font-size:11px;color:gray;line-height:1.3;'>{ans[:80]}{'...' if len(ans)>80 else ''}</span>", unsafe_allow_html=True)
                     else:
-                        st.markdown("<span style='font-size:12px;color:gray;font-style:italic;'>Property registered — no Q&A yet</span>", unsafe_allow_html=True)
-                with r4:
-                    st.markdown(f"<span style='display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;background:#f0f0f0;color:#555;'>{cat}</span>", unsafe_allow_html=True)
-                with r5:
-                    bc1,bc2 = st.columns(2)
-                    with bc1:
+                        st.markdown("<span style='font-size:11px;color:#bbb;font-style:italic;'>No Q&A yet</span>", unsafe_allow_html=True)
                         if st.button("✏️", key=f"editbtn_{eid}", help="Edit"):
                             st.session_state[edit_key] = True
                             st.session_state[open_key] = False
@@ -857,4 +919,4 @@ with tab_view:
                         st.session_state[edit_key] = False
                         st.rerun()
 
-            st.markdown("<hr style='margin:2px 0;border:none;border-top:1px solid #eee;'>", unsafe_allow_html=True)
+            st.markdown("<div style='border-top:1.5px solid #e0e0e0;margin:4px 0;'></div>", unsafe_allow_html=True)
