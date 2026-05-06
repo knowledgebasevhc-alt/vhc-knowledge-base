@@ -709,7 +709,7 @@ with tab_view:
         h0,h1,h2,h3,h4,h5 = st.columns([0.4,1.8,2.5,3,1.2,1])
         for h,lbl in zip([h0,h1,h2,h3,h4,h5],["","SUPPLIER","PROPERTY","QUESTION / ANSWER","CATEGORY","ACTIONS"]):
             with h: st.markdown(f"<span style='font-size:11px;color:gray;font-weight:600;'>{lbl}</span>", unsafe_allow_html=True)
-        st.markdown("<div style='border-top:2px solid #ccc;margin:6px 0 4px 0;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='border-top:2px solid #222;margin:6px 0 4px 0;'></div>", unsafe_allow_html=True)
 
         for row in rows:
             eid      = row["id"]
@@ -743,7 +743,9 @@ with tab_view:
                         st.markdown("<span style='color:#ccc;font-size:11px;'>—</span>", unsafe_allow_html=True)
                 with r2:
                     sub = " | ".join(filter(None,[f"VHC: {vhc}" if vhc else "", f"Unit: {unit}" if unit else ""]))
-                    if st.button(f"🏠 {prop[:35]}{'...' if len(prop)>35 else ''}", key=f"open_btn_{eid}", help=prop):
+                    display_name = unit if unit else prop
+                    short_display = display_name[:35]+'…' if len(display_name)>35 else display_name
+                    if st.button(f"🏠 {short_display}", key=f"open_btn_{eid}", help=prop):
                         st.session_state[open_key] = not st.session_state[open_key]
                         st.rerun()
                     sup_main = sup_lookup.get(sup, "")
@@ -923,4 +925,4 @@ with tab_view:
                         st.session_state[edit_key] = False
                         st.rerun()
 
-            st.markdown("<div style='border-top:1.5px solid #e0e0e0;margin:4px 0;'></div>", unsafe_allow_html=True)
+            st.markdown("<div style='border-top:1.5px solid #333;margin:4px 0;'></div>", unsafe_allow_html=True)
