@@ -466,38 +466,45 @@ with tab_add:
     # ── Dynamic Q&A pairs ──
     st.markdown("**Questions & answers** — *optional. Add as many as you need.*")
 
+    # Use stable pair IDs so indices don't break when removing
     if "qa_pairs" not in st.session_state:
-        st.session_state["qa_pairs"] = [{"q":"","a":""}]
+        st.session_state["qa_pairs"] = [{"id": 0}]
+        st.session_state["qa_counter"] = 1
 
-    pairs = st.session_state["qa_pairs"]
-    to_remove = None
+    pairs_meta = st.session_state["qa_pairs"]
+    to_remove  = None
 
-    for i, pair in enumerate(pairs):
-        st.markdown(f"<div class='qa-pair'>", unsafe_allow_html=True)
-        pc1, pc2, pc3 = st.columns([5, 5, 0.5])
+    for i, pair in enumerate(pairs_meta):
+        pid  = pair["id"]
+        qkey = f"qa_q_{pid}"
+        akey = f"qa_a_{pid}"
+        if qkey not in st.session_state: st.session_state[qkey] = ""
+        if akey not in st.session_state: st.session_state[akey] = ""
+
+        st.markdown(f"<div style='background:#f8f8f8;border-radius:8px;padding:14px;margin-bottom:10px;'>", unsafe_allow_html=True)
+        pc1, pc2 = st.columns(2)
         with pc1:
-            st.markdown(f"<div style='font-size:12px;color:gray;margin-bottom:4px;'>Question {i+1}</div>", unsafe_allow_html=True)
-            pairs[i]["q"] = st.text_area(f"Q{i+1}", value=pair["q"], placeholder="e.g.  Are pets allowed?",     height=80, key=f"q_{i}", label_visibility="collapsed")
+            st.markdown(f"<div style='font-size:12px;color:gray;margin-bottom:2px;font-weight:500;'>Question {i+1}</div>", unsafe_allow_html=True)
+            st.text_area("Q", placeholder="e.g.  Are pets allowed?",  height=90, key=qkey, label_visibility="collapsed")
         with pc2:
-            st.markdown(f"<div style='font-size:12px;color:gray;margin-bottom:4px;'>Answer {i+1}</div>", unsafe_allow_html=True)
-            pairs[i]["a"] = st.text_area(f"A{i+1}", value=pair["a"], placeholder="e.g.  Yes, $150 per stay.",   height=80, key=f"a_{i}", label_visibility="collapsed")
-        with pc3:
-            st.markdown("<div style='margin-top:22px;'>", unsafe_allow_html=True)
-            if len(pairs) > 1:
-                if st.button("✕", key=f"rm_{i}", help="Remove this pair"):
-                    to_remove = i
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='font-size:12px;color:gray;margin-bottom:2px;font-weight:500;'>Answer {i+1}</div>", unsafe_allow_html=True)
+            st.text_area("A", placeholder="e.g.  Yes, $150 per stay.", height=90, key=akey, label_visibility="collapsed")
+        if len(pairs_meta) > 1:
+            if st.button(f"✕  Remove pair {i+1}", key=f"rm_{pid}"):
+                to_remove = i
         st.markdown("</div>", unsafe_allow_html=True)
 
     if to_remove is not None:
-        st.session_state["qa_pairs"].pop(to_remove)
+        removed = st.session_state["qa_pairs"].pop(to_remove)
+        st.session_state.pop(f"qa_q_{removed['id']}", None)
+        st.session_state.pop(f"qa_a_{removed['id']}", None)
         st.rerun()
 
-    ac1, ac2 = st.columns(2)
-    with ac1:
-        if st.button("➕  Add another question & answer"):
-            st.session_state["qa_pairs"].append({"q":"","a":""})
-            st.rerun()
+    if st.button("➕  Add another question & answer"):
+        counter = st.session_state.get("qa_counter", len(pairs_meta))
+        st.session_state["qa_pairs"].append({"id": counter})
+        st.session_state["qa_counter"] = counter + 1
+        st.rerun()
 
     st.markdown("---")
 
@@ -511,8 +518,14 @@ with tab_add:
                     supabase.table("suppliers").update({"website": na_main_url.strip()}).eq("name", na_sup.strip()).execute()
                     get_suppliers.clear()
                 except: pass
-            # Save Q&A pairs (only non-empty ones)
-            valid_pairs = [p for p in pairs if p["q"].strip() and p["a"].strip()]
+            # Read Q&A values from session state (stable key approach)
+            valid_pairs = []
+            for pair in st.session_state.get("qa_pairs", []):
+                pid = pair["id"]
+                q_val = st.session_state.get(f"qa_q_{pid}", "").strip()
+                a_val = st.session_state.get(f"qa_a_{pid}", "").strip()
+                if q_val and a_val:
+                    valid_pairs.append({"q": q_val, "a": a_val})
             if valid_pairs:
                 saved = skipped = 0
                 for p in valid_pairs:
@@ -524,10 +537,15 @@ with tab_add:
                 if skipped: msg += f" ({skipped} duplicate{'s' if skipped>1 else ''} skipped)"
                 st.success(msg)
             else:
-                # Save a property registration entry with no Q&A
                 save_entry(na_vhc, na_prop, "", "", final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url)
                 st.success(f"✅  Property **{na_prop}** registered. Come back to add questions & answers later.")
-            st.session_state["qa_pairs"] = [{"q":"","a":""}]
+            # Reset Q&A pairs
+            for pair in st.session_state.get("qa_pairs", []):
+                pid = pair["id"]
+                st.session_state.pop(f"qa_q_{pid}", None)
+                st.session_state.pop(f"qa_a_{pid}", None)
+            st.session_state["qa_pairs"]   = [{"id": 0}]
+            st.session_state["qa_counter"] = 1
             st.balloons()
         else:
             if na_src == "Other" and not na_src_detail.strip():
@@ -618,6 +636,9 @@ with tab_view:
     if not rows:
         st.info("No entries yet. Add a supplier, then upload a file or add entries manually.")
     else:
+        # Pre-load supplier websites for fast lookup
+        sup_lookup = {s["name"]: s.get("website","") or "" for s in get_suppliers()}
+
         h0,h1,h2,h3,h4,h5 = st.columns([0.4,1.8,2.5,3,1.2,1])
         for h,lbl in zip([h0,h1,h2,h3,h4,h5],["","SUPPLIER","PROPERTY","QUESTION / ANSWER","CATEGORY","ACTIONS"]):
             with h: st.markdown(f"<span style='font-size:11px;color:gray;font-weight:600;'>{lbl}</span>", unsafe_allow_html=True)
@@ -658,17 +679,20 @@ with tab_view:
                         st.session_state[open_key] = not st.session_state[open_key]
                         st.rerun()
                     if sub: st.markdown(f"<span style='font-size:11px;color:gray;'>{sub}</span>", unsafe_allow_html=True)
+                    # All 3 links always visible
+                    sup_main = sup_lookup.get(sup, "")
+                    row_links = []
+                    if sup_main:  row_links.append(f"<a href='{sup_main}' target='_blank' style='font-size:11px;'>🌐 Supplier site</a>")
+                    if sup_lnk:  row_links.append(f"<a href='{sup_lnk}'  target='_blank' style='font-size:11px;'>🔗 Property page</a>")
+                    if sent_lnk: row_links.append(f"<a href='{sent_lnk}' target='_blank' style='font-size:11px;'>🔗 Sentinel</a>")
+                    if row_links:
+                        st.markdown(" &nbsp;·&nbsp; ".join(row_links), unsafe_allow_html=True)
                 with r3:
                     if q:
                         st.markdown(f"<span style='font-size:13px;font-weight:500;'>{q[:70]}</span>", unsafe_allow_html=True)
                         st.markdown(f"<span style='font-size:12px;color:gray;'>{ans[:100]}{'...' if len(ans)>100 else ''}</span>", unsafe_allow_html=True)
                     else:
                         st.markdown("<span style='font-size:12px;color:gray;font-style:italic;'>Property registered — no Q&A yet</span>", unsafe_allow_html=True)
-                    if sup_lnk or sent_lnk:
-                        links = []
-                        if sup_lnk:  links.append(f"<a href='{sup_lnk}'  target='_blank' style='font-size:11px;'>🔗 Supplier</a>")
-                        if sent_lnk: links.append(f"<a href='{sent_lnk}' target='_blank' style='font-size:11px;'>🔗 Sentinel</a>")
-                        st.markdown(" &nbsp; ".join(links), unsafe_allow_html=True)
                 with r4:
                     st.markdown(f"<span style='display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;background:#f0f0f0;color:#555;'>{cat}</span>", unsafe_allow_html=True)
                 with r5:
