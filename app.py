@@ -533,13 +533,43 @@ with tab_view:
     if f_prop.strip():
         rows = [r for r in rows if f_prop.lower() in (r.get("property_name") or "").lower()]
 
-    st.markdown(f"**{len(rows)} entr{'y' if len(rows)==1 else 'ies'} found**")
+    total = len(rows)
+    st.markdown(f"**{total} entr{'y' if total==1 else 'ies'} found**")
 
     if not rows:
         st.info("No entries yet. Start by adding a supplier, then upload a file or add entries manually!")
     else:
+        # ── Bulk action bar ──
+        if "selected_ids" not in st.session_state:
+            st.session_state["selected_ids"] = set()
+
+        sel_count = len(st.session_state["selected_ids"])
+        ba1, ba2, ba3, ba4 = st.columns([1.5, 1.5, 2, 5])
+        with ba1:
+            if st.button("☑️  Select all"):
+                st.session_state["selected_ids"] = {r["id"] for r in rows}
+                st.rerun()
+        with ba2:
+            if st.button("⬜  Clear selection"):
+                st.session_state["selected_ids"] = set()
+                st.rerun()
+        with ba3:
+            if sel_count:
+                if st.button(f"🗑️  Delete selected ({sel_count})", type="primary"):
+                    for rid in st.session_state["selected_ids"]:
+                        delete_entry(rid)
+                    st.session_state["selected_ids"] = set()
+                    st.success(f"✅  Deleted {sel_count} entr{'y' if sel_count==1 else 'ies'}.")
+                    st.rerun()
+        with ba4:
+            if sel_count:
+                st.markdown(f"<span style='font-size:13px;color:var(--color-text-secondary);'>{sel_count} selected</span>", unsafe_allow_html=True)
+
+        st.markdown("<hr style='margin:6px 0 8px 0;border:none;border-top:0.5px solid var(--color-border-tertiary);'>", unsafe_allow_html=True)
+
         # Table header
-        h1, h2, h3, h4, h5 = st.columns([2, 3, 3, 1.2, 1.2])
+        h0, h1, h2, h3, h4, h5 = st.columns([0.4, 2, 3, 3, 1.2, 1.2])
+        with h0: st.markdown("<span style='font-size:12px;color:var(--color-text-secondary);font-weight:500;'></span>", unsafe_allow_html=True)
         with h1: st.markdown("<span style='font-size:12px;color:var(--color-text-secondary);font-weight:500;'>SUPPLIER</span>", unsafe_allow_html=True)
         with h2: st.markdown("<span style='font-size:12px;color:var(--color-text-secondary);font-weight:500;'>PROPERTY</span>", unsafe_allow_html=True)
         with h3: st.markdown("<span style='font-size:12px;color:var(--color-text-secondary);font-weight:500;'>QUESTION</span>", unsafe_allow_html=True)
@@ -558,8 +588,15 @@ with tab_view:
                 style = supplier_badge_style(sup)
                 cat   = row.get("question_category","") or "Other"
                 vhc   = row.get("vhc_id","") or ""
+                is_checked = row["id"] in st.session_state["selected_ids"]
 
-                r1, r2, r3, r4, r5 = st.columns([2, 3, 3, 1.2, 1.2])
+                r0, r1, r2, r3, r4, r5 = st.columns([0.4, 2, 3, 3, 1.2, 1.2])
+                with r0:
+                    checked = st.checkbox("", value=is_checked, key=f"chk_{row['id']}", label_visibility="collapsed")
+                    if checked and row["id"] not in st.session_state["selected_ids"]:
+                        st.session_state["selected_ids"].add(row["id"])
+                    elif not checked and row["id"] in st.session_state["selected_ids"]:
+                        st.session_state["selected_ids"].discard(row["id"])
                 with r1:
                     if sup:
                         st.markdown(f"<span style='display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:500;{style}'>{sup}</span>", unsafe_allow_html=True)
