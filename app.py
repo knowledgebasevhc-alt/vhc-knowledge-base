@@ -760,16 +760,20 @@ with tab_view:
                         st.markdown(f"<span style='font-size:11px;color:gray;line-height:1.3;'>{ans[:80]}{'...' if len(ans)>80 else ''}</span>", unsafe_allow_html=True)
                     else:
                         st.markdown("<span style='font-size:11px;color:#bbb;font-style:italic;'>No Q&A yet</span>", unsafe_allow_html=True)
-                        if st.button("✏️", key=f"editbtn_{eid}", help="Edit"):
+                with r4:
+                    st.markdown(f"<span style='display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;background:#f0f0f0;color:#666;'>{cat}</span>", unsafe_allow_html=True)
+                with r5:
+                    bc1,bc2 = st.columns(2)
+                    with bc1:
+                        if st.button('✏️', key=f'editbtn_{eid}', help='Edit'):
                             st.session_state[edit_key] = True
                             st.session_state[open_key] = False
                             st.rerun()
                     with bc2:
-                        if st.button("🗑️", key=f"delbtn_{eid}", help="Delete"):
+                        if st.button('🗑️', key=f'delbtn_{eid}', help='Delete'):
                             delete_entry(eid)
                             sel.discard(eid)
                             st.rerun()
-
                 # ── Expanded detail panel ──
                 if st.session_state[open_key]:
                     sup_main = get_supplier_website(sup) if sup else ""
