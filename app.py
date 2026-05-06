@@ -22,23 +22,39 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Password ───────────────────────────────────────────────────────────────────
+import hashlib as _hl
+
+def _token(pw: str) -> str:
+    return _hl.sha256(pw.encode()).hexdigest()[:16]
+
 def check_password():
+    correct_token = _token(st.secrets["APP_PASSWORD"])
+
+    # Check URL token first (persists across refreshes)
+    params = st.query_params
+    if params.get("auth") == correct_token:
+        st.session_state["password_correct"] = True
+        return True
+
+    # Check session state
+    if st.session_state.get("password_correct"):
+        return True
+
+    # Show login form
     def password_entered():
         if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
             st.session_state["password_correct"] = True
+            st.query_params["auth"] = correct_token
             del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
-    if "password_correct" not in st.session_state:
-        st.markdown("## 🏠 VHC Knowledge Base")
-        st.text_input("Enter team password:", type="password", on_change=password_entered, key="password")
-        return False
-    elif not st.session_state["password_correct"]:
-        st.markdown("## 🏠 VHC Knowledge Base")
-        st.text_input("Enter team password:", type="password", on_change=password_entered, key="password")
+
+    st.markdown("## 🏠 VHC Knowledge Base")
+    st.text_input("Enter team password:", type="password",
+                  on_change=password_entered, key="password")
+    if st.session_state.get("password_correct") == False:
         st.error("❌ Incorrect password.")
-        return False
-    return True
+    return False
 
 if not check_password():
     st.stop()
@@ -488,18 +504,65 @@ with tab_upload:
                     if text.startswith("ERROR"):
                         st.error(text)
                     else:
-                        st.info("✅  File read. Analyzing with AI...")
-                        with st.spinner("Extracting information (20–30 seconds)..."):
-                            entries = extract_entries(text)
-                        valid = [e for e in entries if e.get("property_name","").strip() and e.get("question","").strip() and e.get("answer","").strip()]
-                        if not valid:
-                            st.warning("⚠️  No clear property Q&A found.")
+                        # Detect if this is a property index CSV (has VHC ID column)
+                        is_property_csv = up_file.name.lower().endswith((".csv",".xlsx",".xls")) and                                           any(col in text[:500] for col in ["VHC ID","Property VHC ID","vhc_id","Property Name"])
+
+                        if is_property_csv:
+                            # Parse directly as property index
+                            try:
+                                raw_copy = raw  # raw bytes already in scope
+                                fname_lower = up_file.name.lower()
+                                if fname_lower.endswith(".csv"):
+                                    df = pd.read_csv(io.BytesIO(raw_copy))
+                                else:
+                                    df = pd.read_excel(io.BytesIO(raw_copy))
+                                df.columns = [str(c).strip() for c in df.columns]
+
+                                # Map columns flexibly
+                                name_col = next((c for c in df.columns if "name" in c.lower() and "property" in c.lower()), None) or                                            next((c for c in df.columns if "name" in c.lower()), None)
+                                vhc_col  = next((c for c in df.columns if "vhc" in c.lower()), None)
+                                addr_col = next((c for c in df.columns if "address" in c.lower()), None)
+                                city_col = next((c for c in df.columns if "city" in c.lower()), None)
+                                state_col= next((c for c in df.columns if "state" in c.lower()), None)
+
+                                prop_entries = []
+                                for _, row in df.iterrows():
+                                    pname = str(row.get(name_col,"") if name_col else "").strip()
+                                    if not pname or pname == "nan": continue
+                                    vhc   = str(row.get(vhc_col,"")  if vhc_col  else "").strip()
+                                    addr  = str(row.get(addr_col,"") if addr_col else "").strip()
+                                    city  = str(row.get(city_col,"") if city_col else "").strip()
+                                    state = str(row.get(state_col,"")if state_col else "").strip()
+                                    full_addr = ", ".join(filter(lambda x: x and x!="nan", [addr, city, state]))
+                                    prop_entries.append({
+                                        "property_name": pname,
+                                        "vhc_id":        vhc if vhc != "nan" else "",
+                                        "unit_label":    full_addr,
+                                        "question":      "",
+                                        "answer":        ""
+                                    })
+
+                                st.success(f"✅  Found **{len(prop_entries)} properties** in this file for **{up_sup}**")
+                                st.info("ℹ️  This is a property index file. Properties will be registered with no Q&A — add questions and answers later via Add Entry.")
+                                st.session_state.update({
+                                    "ex_entries":prop_entries,"ex_file":up_file.name,
+                                    "ex_supplier":up_sup,"ex_by":up_by,"ex_hash":fhash
+                                })
+                            except Exception as ex:
+                                st.error(f"Could not parse file: {ex}")
                         else:
-                            st.success(f"✅  Found **{len(valid)} entries** for **{up_sup}**")
-                            st.session_state.update({
-                                "ex_entries":valid,"ex_file":up_file.name,
-                                "ex_supplier":up_sup,"ex_by":up_by,"ex_hash":fhash
-                            })
+                            st.info("✅  File read. Analyzing with AI...")
+                            with st.spinner("Extracting information (20–30 seconds)..."):
+                                entries = extract_entries(text)
+                            valid = [e for e in entries if e.get("property_name","").strip() and e.get("question","").strip() and e.get("answer","").strip()]
+                            if not valid:
+                                st.warning("⚠️  No clear property Q&A found. If this is a property list, try saving as CSV.")
+                            else:
+                                st.success(f"✅  Found **{len(valid)} entries** for **{up_sup}**")
+                                st.session_state.update({
+                                    "ex_entries":valid,"ex_file":up_file.name,
+                                    "ex_supplier":up_sup,"ex_by":up_by,"ex_hash":fhash
+                                })
 
         if st.session_state.get("ex_entries"):
             valid    = st.session_state["ex_entries"]
