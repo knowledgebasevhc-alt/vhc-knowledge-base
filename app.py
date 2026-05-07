@@ -282,14 +282,78 @@ def scrape(url: str, query: str) -> str:
 def search_kb(query: str) -> str:
     rows = supabase.table("knowledge_base").select("*").execute().data
     if not rows: return "NOT_FOUND"
-    prompt = f"""VacayHome assistant. Team member asked: "{query}"
-Knowledge base:
-{json.dumps(rows, indent=2, default=str)[:8000]}
-If relevant match found, give a clear answer. Include supplier name, property name, and any links available.
-Also return a JSON footer on a new line formatted exactly like:
-META: {{"supplier":"...","added_by":"...","source":"...","date":"...","supplier_url":"...","sentinel_url":"..."}}
-If no match: respond exactly NOT_FOUND."""
-    return ask_ai(prompt)
+
+    q_lower  = query.lower()
+    q_words  = set(q_lower.split())
+    stop_words = {"a","an","the","is","are","do","does","can","for","of","to","in",
+                  "at","on","it","i","we","my","what","how","when","where","who",
+                  "which","this","that","with","have","has","be","was","will","would",
+                  "there","their","they","your","get","any","all","some","just","not"}
+    keywords = [w.strip("?.,!") for w in q_words
+                if len(w.strip("?.,!")) > 2 and w.strip("?.,!") not in stop_words]
+
+    def score_row(r):
+        # Combine all text fields for matching
+        text = " ".join(str(v) for v in [
+            r.get("property_name",""), r.get("unit_label",""),
+            r.get("vhc_id",""), r.get("supplier_name",""),
+            r.get("question",""), r.get("answer","")
+        ] if v).lower()
+        return sum(2 if kw in (r.get("property_name","") or "").lower()
+                     else 1 for kw in keywords if kw in text)
+
+    scored = sorted(rows, key=score_row, reverse=True)
+
+    # Split: rows with answers vs property-only registrations
+    with_answers    = [r for r in scored if (r.get("question") or "").strip() and (r.get("answer") or "").strip()]
+    without_answers = [r for r in scored if not (r.get("question") or "").strip()]
+    supplier_rows   = [r for r in rows   if r.get("knowledge_type") == "supplier"
+                       and (r.get("answer") or "").strip()]
+
+    # Top candidates with answers
+    candidates = with_answers[:40]
+    # Always include supplier Q&A
+    for sr in supplier_rows:
+        if sr not in candidates:
+            candidates.append(sr)
+    candidates = candidates[:60]
+
+    # Check if any property NAMES match the query (even without answers)
+    matched_props = [r for r in without_answers
+                     if score_row(r) >= 2][:5]
+
+    # Step 1: try to find an answer
+    if candidates:
+        prompt = f"""You are an assistant for a vacation rental company called VacayHome.
+A team member asked: "{query}"
+
+Below are relevant knowledge base entries:
+{json.dumps(candidates, indent=2, default=str)[:9000]}
+
+Instructions:
+- Search for entries that answer the question.
+- Supplier-level entries (knowledge_type=supplier) apply to ALL units from that supplier.
+- Unit-level entries (knowledge_type=unit) apply to one specific property.
+- If you find a clear answer, respond with it. Include property name, supplier, and any links.
+  Also include this footer on a new line:
+  META: {{"supplier":"...","added_by":"...","source":"...","date":"...","supplier_url":"...","sentinel_url":"..."}}
+- If nothing in the list answers this question, respond exactly: NO_ANSWER
+- Never invent information."""
+        result = ask_ai(prompt)
+        if "NO_ANSWER" not in result and "NOT_FOUND" not in result:
+            return result
+
+    # Step 2: property is registered but no answer yet
+    if matched_props:
+        prop = matched_props[0]
+        pname  = prop.get("property_name","") or ""
+        sup    = prop.get("supplier_name","")  or ""
+        vhc    = prop.get("vhc_id","")         or ""
+        slnk   = prop.get("supplier_url","")   or ""
+        senlnk = prop.get("sentinel_url","")   or ""
+        return (f"PROPERTY_FOUND|{pname}|{sup}|{vhc}|{slnk}|{senlnk}")
+
+    return "NOT_FOUND"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # UI
@@ -346,7 +410,31 @@ with tab_search:
         with st.spinner("Searching knowledge base..."):
             result = search_kb(query)
 
-        if "NOT_FOUND" not in result:
+        if result.startswith("PROPERTY_FOUND"):
+            # Property exists but no answer yet for this question
+            parts    = result.split("|")
+            pname    = parts[1] if len(parts) > 1 else ""
+            sup      = parts[2] if len(parts) > 2 else ""
+            vhc      = parts[3] if len(parts) > 3 else ""
+            slnk     = parts[4] if len(parts) > 4 else ""
+            senlnk   = parts[5] if len(parts) > 5 else ""
+            st.warning(f"🔍  **{pname}** is in your knowledge base but we don't have the answer to this specific question yet.")
+            sup_lookup_s = {s["name"]: s.get("website","") or "" for s in get_suppliers()}
+            sup_main = sup_lookup_s.get(sup,"")
+            st.markdown(f"""
+<div style='background:#fff8e1;border-left:4px solid #f59e0b;border-radius:0 8px 8px 0;padding:14px 18px;margin:8px 0;'>
+<div style='font-size:15px;font-weight:600;margin-bottom:8px;'>🏠 {pname}</div>
+<div style='font-size:13px;color:gray;margin-bottom:10px;'>
+{"Supplier: "+sup+" &nbsp;·&nbsp; " if sup else ""}{"VHC: "+vhc if vhc else ""}
+</div>
+<div style='font-size:13px;'>We don't have this information saved yet.
+You can contact the supplier to find out, then save the answer using <b>Add Entry</b>.</div>
+{"<div style='margin-top:10px;'>"+"".join([f"<a href='{l}' target='_blank' style='font-size:12px;margin-right:16px;'>"+n+"</a>" for l,n in [(sup_main,"🌐 Supplier website"),(slnk,"🔗 Property page"),(senlnk,"🔗 Sentinel")] if l])+"</div>" if any([sup_main,slnk,senlnk]) else ""}
+</div>
+""", unsafe_allow_html=True)
+            st.markdown("<div class='tip-box'>Once you get the answer, go to <strong>Add Entry → Unit Question</strong> to save it permanently.</div>", unsafe_allow_html=True)
+
+        elif "NOT_FOUND" not in result:
             # Parse META footer if present
             meta = {}
             answer_text = result
@@ -497,6 +585,13 @@ with tab_upload:
         up_sup  = st.selectbox("Which supplier does this file belong to? *",
                                ["— Select —"] + sup_names,
                                key=f"up_sup_{st.session_state['up_form_key']}")
+        up_type = st.radio(
+            "What type of information is in this file?",
+            ["🏠  Unit Q&A — specific to individual properties",
+             "🏢  Supplier Q&A — applies to all units from this supplier"],
+            horizontal=True,
+            key=f"up_type_{st.session_state['up_form_key']}"
+        )
         up_file = st.file_uploader("Choose a file", type=["csv","xlsx","xls","txt","pdf","docx","md"],
                                    key=f"up_file_{st.session_state['up_form_key']}")
         up_by   = st.text_input("Your name *", placeholder="e.g. Maria",
@@ -614,7 +709,8 @@ with tab_upload:
                     if is_duplicate(prop, q, vhc):
                         skipped += 1; continue
                     try:
-                        save_entry(vhc, prop, q, e.get("answer",""), f"File: {filename}", by, supplier, e.get("unit_label",""))
+                        k_type = "supplier" if "🏢" in st.session_state.get(f"up_type_{st.session_state.get('up_form_key',0)}", "") else "unit"
+                        save_entry(vhc, prop, q, e.get("answer",""), f"File: {filename}", by, supplier, e.get("unit_label",""), "", "", k_type)
                         saved += 1
                     except Exception as ex: st.error(f"Error: {ex}")
                 register_file(fhash, filename, supplier, by)
