@@ -487,9 +487,16 @@ with tab_upload:
     if not sup_names:
         st.warning("⚠️  No suppliers yet. Go to Suppliers tab first.")
     else:
-        up_sup  = st.selectbox("Which supplier does this file belong to? *", ["— Select —"] + sup_names)
-        up_file = st.file_uploader("Choose a file", type=["csv","xlsx","xls","txt","pdf","docx","md"])
-        up_by   = st.text_input("Your name *", placeholder="e.g. Maria", key="up_by")
+        if "up_form_key" not in st.session_state:
+            st.session_state["up_form_key"] = 0
+
+        up_sup  = st.selectbox("Which supplier does this file belong to? *",
+                               ["— Select —"] + sup_names,
+                               key=f"up_sup_{st.session_state['up_form_key']}")
+        up_file = st.file_uploader("Choose a file", type=["csv","xlsx","xls","txt","pdf","docx","md"],
+                                   key=f"up_file_{st.session_state['up_form_key']}")
+        up_by   = st.text_input("Your name *", placeholder="e.g. Maria",
+                                key=f"up_by_{st.session_state['up_form_key']}")
 
         if up_file and up_by and up_sup != "— Select —":
             if st.button("🤖  Analyze & Extract Information", type="primary"):
@@ -571,21 +578,30 @@ with tab_upload:
             by       = st.session_state["ex_by"]
             fhash    = st.session_state["ex_hash"]
             st.markdown("---")
-            st.markdown("**Review entries — then click Save All:**")
-            for e in valid:
-                with st.expander(f"🏠  {e.get('property_name','')[:50]}  |  {e.get('question','')[:60]}"):
-                    c1,c2 = st.columns(2)
-                    with c1:
-                        st.markdown(f"**Property:** {e.get('property_name','')}")
-                        if e.get('vhc_id'):     st.markdown(f"**VHC ID:** {e['vhc_id']}")
-                        if e.get('unit_label'): st.markdown(f"**Unit:** {e['unit_label']}")
-                        st.markdown(f"**Supplier:** {supplier}")
-                    with c2:
-                        st.markdown(f"**Category:** {categorize(e.get('question',''))}")
-                    st.markdown(f"**Q:** {e.get('question','')}")
-                    st.markdown(f"**A:** {e.get('answer','')}")
+
+            # ── Save All button at TOP so it's never missed ──
+            st.markdown(f"### Ready to save {len(valid)} entries for {supplier}")
+            top_save = st.button(f"💾  Save All {len(valid)} Entries Now", type="primary",
+                                 key="save_all_top", use_container_width=True)
+
+            # ── Collapsible preview ──
+            with st.expander(f"👁️  Preview all {len(valid)} entries (optional)", expanded=False):
+                for e in valid:
+                    prop = e.get('property_name','')
+                    q    = e.get('question','')
+                    ans  = e.get('answer','')
+                    vhc  = e.get('vhc_id','')
+                    st.markdown(f"**🏠 {prop[:60]}** {'· VHC: '+vhc if vhc else ''}")
+                    if q: st.markdown(f"&nbsp;&nbsp;Q: {q[:80]}")
+                    if ans: st.markdown(f"&nbsp;&nbsp;A: {ans[:80]}")
+                    st.markdown("<hr style='margin:4px 0;border:none;border-top:0.5px solid #eee;'>",
+                                unsafe_allow_html=True)
+
             st.markdown("---")
-            if st.button(f"💾  Save All {len(valid)} Entries to Knowledge Base", type="primary"):
+            bottom_save = st.button(f"💾  Save All {len(valid)} Entries Now", type="primary",
+                                    key="save_all_bottom", use_container_width=True)
+
+            if top_save or bottom_save:
                 saved = skipped = 0
                 for e in valid:
                     prop = e.get("property_name","")
@@ -603,6 +619,7 @@ with tab_upload:
                 st.success(msg)
                 for k in ["ex_entries","ex_file","ex_supplier","ex_by","ex_hash"]:
                     st.session_state.pop(k, None)
+                st.session_state["up_form_key"] = st.session_state.get("up_form_key", 0) + 1
                 st.balloons()
         elif up_file and not up_by: st.warning("Enter your name.")
         elif up_file and up_sup == "— Select —": st.warning("Select a supplier.")
@@ -731,15 +748,43 @@ with tab_add:
 with tab_suppliers:
     st.subheader("Manage Your Suppliers")
     st.caption("Add suppliers here first — they appear in all dropdowns across the app.")
-    with st.form("add_sup_form"):
+    if "sup_form_key" not in st.session_state:
+        st.session_state["sup_form_key"] = 0
+
+    with st.form(f"add_sup_form_{st.session_state['sup_form_key']}"):
         fc1, fc2 = st.columns(2)
         with fc1: new_name = st.text_input("Supplier Name *", placeholder="e.g.  Blue Swell Rentals")
         with fc2: new_web  = st.text_input("Main Website URL", placeholder="e.g.  https://blueswellrentals.com")
+        new_ci_when = st.selectbox("When are check-in instructions sent?", [
+            "— Select —",
+            "Day of check-in",
+            "A few hours before check-in",
+            "24 hours before check-in",
+            "3 days before check-in",
+            "5 days before check-in",
+            "7+ days before check-in",
+            "Varies / Not specified"
+        ])
+        new_ci_how = st.selectbox("How are they sent?", [
+            "— Select —","Email","SMS / Text","Portal / App","Email + Rental Agreement","Phone call","Other"
+        ])
+        new_ci_notes = st.text_area("Check-in notes",
+            placeholder="e.g.  Lockbox code sent via email. Rental agreement required before access code released.",
+            height=80)
         if st.form_submit_button("➕  Add Supplier", type="primary"):
             if new_name.strip():
                 try:
-                    supabase.table("suppliers").insert({"name":new_name.strip(),"website":new_web.strip()}).execute()
+                    ci_text = ""
+                    if new_ci_when != "— Select —": ci_text += f"Timing: {new_ci_when}. "
+                    if new_ci_how  != "— Select —": ci_text += f"Method: {new_ci_how}. "
+                    if new_ci_notes.strip():         ci_text += new_ci_notes.strip()
+                    supabase.table("suppliers").insert({
+                        "name":    new_name.strip(),
+                        "website": new_web.strip(),
+                        "checkin_instructions": ci_text.strip()
+                    }).execute()
                     get_suppliers.clear()
+                    st.session_state["sup_form_key"] += 1
                     st.success(f"✅  Added **{new_name}**!")
                     st.rerun()
                 except Exception as e:
@@ -750,7 +795,7 @@ with tab_suppliers:
     st.markdown(f"**{len(sups)} supplier{'s' if len(sups)!=1 else ''}**")
     for s in sups:
         with st.expander(f"🏢  {s['name']}"):
-            c1,c2 = st.columns(2)
+            c1, c2 = st.columns(2)
             with c1:
                 st.markdown(f"**Name:** {s['name']}")
                 web = s.get('website') or ''
@@ -760,11 +805,35 @@ with tab_suppliers:
                     st.markdown("**Website:** —")
             with c2:
                 st.markdown(f"**Added:** {(s.get('created_at') or '')[:10] or '—'}")
-            if st.button("🗑️  Delete supplier", key=f"delsup_{s['id']}"):
-                supabase.table("suppliers").delete().eq("id", s["id"]).execute()
-                get_suppliers.clear()
-                st.success("Deleted.")
-                st.rerun()
+            ci = s.get('checkin_instructions') or ''
+            if ci:
+                st.markdown(f"**Check-in instructions:** {ci}")
+            else:
+                st.markdown("**Check-in instructions:** —")
+
+            # Edit check-in instructions inline
+            with st.form(f"edit_ci_{s['id']}"):
+                new_ci = st.text_area("Update check-in instructions",
+                    value=ci,
+                    placeholder="e.g.  Timing: 3 days before. Method: Email. Lockbox code sent via email.",
+                    height=80, label_visibility="visible")
+                new_web_edit = st.text_input("Update website URL", value=web or "")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.form_submit_button("💾  Save changes"):
+                        supabase.table("suppliers").update({
+                            "checkin_instructions": new_ci.strip(),
+                            "website": new_web_edit.strip()
+                        }).eq("id", s["id"]).execute()
+                        get_suppliers.clear()
+                        st.success("Updated!")
+                        st.rerun()
+                with col2:
+                    if st.form_submit_button("🗑️  Delete supplier"):
+                        supabase.table("suppliers").delete().eq("id", s["id"]).execute()
+                        get_suppliers.clear()
+                        st.success("Deleted.")
+                        st.rerun()
 
 # ══ VIEW / EDIT ALL ═══════════════════════════════════════════════════════════
 with tab_view:
