@@ -131,7 +131,8 @@ def badge_style(name: str) -> str:
 
 # ── DB helpers ─────────────────────────────────────────────────────────────────
 def save_entry(vhc_id, property_name, question, answer, source, added_by,
-               supplier_name="", unit_label="", supplier_url="", sentinel_url=""):
+               supplier_name="", unit_label="", supplier_url="", sentinel_url="",
+               knowledge_type="unit"):
     supabase.table("knowledge_base").insert({
         "vhc_id":            vhc_id or "",
         "unit_label":        unit_label or "",
@@ -144,12 +145,15 @@ def save_entry(vhc_id, property_name, question, answer, source, added_by,
         "supplier_name":     supplier_name or "",
         "supplier_url":      supplier_url or "",
         "sentinel_url":      sentinel_url or "",
+        "knowledge_type":    knowledge_type or "unit",
         "updated_at":        datetime.utcnow().isoformat()
     }).execute()
 
 def update_entry(row_id, data: dict):
     data["question_category"] = categorize(data.get("question","")) if data.get("question") else "Other"
     data["updated_at"]        = datetime.utcnow().isoformat()
+    if "knowledge_type" not in data:
+        data["knowledge_type"] = "unit"
     supabase.table("knowledge_base").update(data).eq("id", row_id).execute()
 
 def delete_entry(entry_id: int):
@@ -626,125 +630,206 @@ with tab_upload:
 
 # ══ ADD ENTRY ═════════════════════════════════════════════════════════════════
 with tab_add:
-    st.subheader("Add property information")
-    st.caption("Fill in the property details below. Questions & answers are optional — save now and add them later if needed.")
+    st.subheader("Add Information")
+    st.caption("Choose which type of information you are adding.")
 
     sup_names = get_supplier_names()
 
-    # ── Property details ──
-    st.markdown("**Property details**")
-    c1, c2 = st.columns(2)
-    with c1:
-        na_sup = st.selectbox("Supplier *", ["— Select —"] + sup_names + ["+ Type new supplier"], key="na_sup")
-        if na_sup == "+ Type new supplier":
-            na_sup = st.text_input("Type supplier name:", key="na_sup_txt")
-        na_vhc  = st.text_input("VHC ID",         placeholder="e.g.  402129")
-        na_unit = st.text_input("Unit Label",      placeholder="e.g.  Unit 2B / Villa 3")
-        na_prop = st.text_input("Property Name *", placeholder="e.g.  66 Snapper St, Santa Rosa Beach, FL")
-    with c2:
-        na_main_url  = st.text_input("🌐  Supplier main website",        placeholder="https://blueswellrentals.com")
-        na_sup_url   = st.text_input("🔗  Link to property on supplier site", placeholder="https://blueswellrentals.com/property/sands-of-time")
-        na_sent_url  = st.text_input("🔗  Link to property in Sentinel",      placeholder="https://sentinel.vacayhomeconnect.com/suppliers/39/properties/402129")
-        na_src = st.selectbox("Source *", SOURCE_OPTS)
-        if na_src == "Other":
-            na_src_detail = st.text_input("Please specify source *", placeholder="e.g.  https://vrbo.com/123456 or 'Manager phone call'")
-        else:
-            na_src_detail = ""
-        na_by = st.text_input("Your name *", placeholder="e.g.  Maria")
-
+    add_type = st.radio(
+        "What kind of information is this?",
+        ["🏠  Unit Question — specific to ONE property",
+         "🏢  Supplier Question — applies to ALL units from one supplier"],
+        horizontal=True
+    )
     st.markdown("---")
 
-    # ── Dynamic Q&A pairs ──
-    st.markdown("**Questions & answers** — *optional. Add as many as you need.*")
-
-    # Use stable pair IDs so indices don't break when removing
-    if "qa_pairs" not in st.session_state:
-        st.session_state["qa_pairs"] = [{"id": 0}]
-        st.session_state["qa_counter"] = 1
-
-    pairs_meta = st.session_state["qa_pairs"]
-    to_remove  = None
-
-    for i, pair in enumerate(pairs_meta):
-        pid  = pair["id"]
-        qkey = f"qa_q_{pid}"
-        akey = f"qa_a_{pid}"
-        if qkey not in st.session_state: st.session_state[qkey] = ""
-        if akey not in st.session_state: st.session_state[akey] = ""
-
-        st.markdown(f"<div style='background:#f8f8f8;border-radius:8px;padding:14px;margin-bottom:10px;'>", unsafe_allow_html=True)
-        pc1, pc2 = st.columns(2)
-        with pc1:
-            st.markdown(f"<div style='font-size:12px;color:gray;margin-bottom:2px;font-weight:500;'>Question {i+1}</div>", unsafe_allow_html=True)
-            st.text_area("Q", placeholder="e.g.  Are pets allowed?",  height=90, key=qkey, label_visibility="collapsed")
-        with pc2:
-            st.markdown(f"<div style='font-size:12px;color:gray;margin-bottom:2px;font-weight:500;'>Answer {i+1}</div>", unsafe_allow_html=True)
-            st.text_area("A", placeholder="e.g.  Yes, $150 per stay.", height=90, key=akey, label_visibility="collapsed")
-        if len(pairs_meta) > 1:
-            if st.button(f"✕  Remove pair {i+1}", key=f"rm_{pid}"):
-                to_remove = i
-        st.markdown("</div>", unsafe_allow_html=True)
-
-    if to_remove is not None:
-        removed = st.session_state["qa_pairs"].pop(to_remove)
-        st.session_state.pop(f"qa_q_{removed['id']}", None)
-        st.session_state.pop(f"qa_a_{removed['id']}", None)
-        st.rerun()
-
-    if st.button("➕  Add another question & answer"):
-        counter = st.session_state.get("qa_counter", len(pairs_meta))
-        st.session_state["qa_pairs"].append({"id": counter})
-        st.session_state["qa_counter"] = counter + 1
-        st.rerun()
-
-    st.markdown("---")
-
-    if st.button("✅  Save to Knowledge Base", type="primary", use_container_width=True):
-        final_src = na_src_detail.strip() if na_src == "Other" else na_src
-        if na_prop.strip() and na_sup not in ["— Select —",""] and final_src and na_by.strip():
-            ensure_supplier(na_sup)
-            # Update supplier website if provided
-            if na_main_url.strip():
-                try:
-                    supabase.table("suppliers").update({"website": na_main_url.strip()}).eq("name", na_sup.strip()).execute()
-                    get_suppliers.clear()
-                except: pass
-            # Read Q&A values from session state (stable key approach)
-            valid_pairs = []
-            for pair in st.session_state.get("qa_pairs", []):
-                pid = pair["id"]
-                q_val = st.session_state.get(f"qa_q_{pid}", "").strip()
-                a_val = st.session_state.get(f"qa_a_{pid}", "").strip()
-                if q_val and a_val:
-                    valid_pairs.append({"q": q_val, "a": a_val})
-            if valid_pairs:
-                saved = skipped = 0
-                for p in valid_pairs:
-                    if is_duplicate(na_prop, p["q"], na_vhc):
-                        skipped += 1; continue
-                    save_entry(na_vhc, na_prop, p["q"], p["a"], final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url)
-                    saved += 1
-                msg = f"✅  Saved {saved} Q&A pair{'s' if saved!=1 else ''} for **{na_prop}**!"
-                if skipped: msg += f" ({skipped} duplicate{'s' if skipped>1 else ''} skipped)"
-                st.success(msg)
+    if "🏠" in add_type:
+        st.markdown("""
+<div style='background:#f0f7ff;border-left:4px solid #4A90D9;border-radius:0 8px 8px 0;
+     padding:12px 16px;margin-bottom:16px;font-size:13px;'>
+<b>🏠 Unit Question</b> — Use this when the answer only applies to ONE specific property.<br>
+<span style='color:gray;'>Example: "Does unit 207 have a fenced yard?" or "Is the pool at 66 Snapper heated?"</span>
+</div>
+""", unsafe_allow_html=True)
+        c1, c2 = st.columns(2)
+        with c1:
+            na_sup = st.selectbox("Supplier *", ["— Select —"] + sup_names + ["+ Type new supplier"], key="na_sup")
+            if na_sup == "+ Type new supplier":
+                na_sup = st.text_input("Type supplier name:", key="na_sup_txt")
+            na_vhc  = st.text_input("VHC ID",         placeholder="e.g.  402129")
+            na_unit = st.text_input("Unit Label",      placeholder="e.g.  Unit 2B / Villa 3")
+            na_prop = st.text_input("Property Name *", placeholder="e.g.  66 Snapper St, Santa Rosa Beach, FL")
+        with c2:
+            na_main_url = st.text_input("🌐  Supplier main website",                  placeholder="https://blueswellrentals.com")
+            na_sup_url  = st.text_input("🔗  Link to this property on supplier site",  placeholder="https://blueswellrentals.com/property/...")
+            na_sent_url = st.text_input("🔗  Link to this property in Sentinel",       placeholder="https://sentinel.vacayhomeconnect.com/...")
+            na_src = st.selectbox("Source *", SOURCE_OPTS, key="na_src_unit")
+            if na_src == "Other":
+                na_src_detail = st.text_input("Please specify source *", placeholder="e.g.  Manager phone call", key="na_src_other_unit")
             else:
-                save_entry(na_vhc, na_prop, "", "", final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url)
-                st.success(f"✅  Property **{na_prop}** registered. Come back to add questions & answers later.")
-            # Reset Q&A pairs
-            for pair in st.session_state.get("qa_pairs", []):
-                pid = pair["id"]
-                st.session_state.pop(f"qa_q_{pid}", None)
-                st.session_state.pop(f"qa_a_{pid}", None)
+                na_src_detail = ""
+            na_by = st.text_input("Your name *", placeholder="e.g.  Maria", key="na_by_unit")
+
+        st.markdown("**Questions & answers** — *optional. Save the property now and add Q&A later if needed.*")
+
+        if "qa_pairs" not in st.session_state:
             st.session_state["qa_pairs"]   = [{"id": 0}]
             st.session_state["qa_counter"] = 1
-            st.balloons()
-        else:
-            if na_src == "Other" and not na_src_detail.strip():
-                st.error("Please specify the source when selecting 'Other'.")
+        pairs_meta = st.session_state["qa_pairs"]
+        to_remove  = None
+        for i, pair in enumerate(pairs_meta):
+            pid  = pair["id"]
+            qkey = f"qa_q_{pid}"
+            akey = f"qa_a_{pid}"
+            if qkey not in st.session_state: st.session_state[qkey] = ""
+            if akey not in st.session_state: st.session_state[akey] = ""
+            st.markdown("<div style='background:#f8f8f8;border-radius:8px;padding:14px;margin-bottom:10px;'>", unsafe_allow_html=True)
+            pc1, pc2 = st.columns(2)
+            with pc1:
+                st.markdown(f"<div style='font-size:12px;color:gray;margin-bottom:2px;font-weight:500;'>Question {i+1}</div>", unsafe_allow_html=True)
+                st.text_area("Q", placeholder="e.g.  Are pets allowed?",   height=90, key=qkey, label_visibility="collapsed")
+            with pc2:
+                st.markdown(f"<div style='font-size:12px;color:gray;margin-bottom:2px;font-weight:500;'>Answer {i+1}</div>", unsafe_allow_html=True)
+                st.text_area("A", placeholder="e.g.  Yes, $150 per stay.", height=90, key=akey, label_visibility="collapsed")
+            if len(pairs_meta) > 1:
+                if st.button(f"✕  Remove pair {i+1}", key=f"rm_{pid}"):
+                    to_remove = i
+            st.markdown("</div>", unsafe_allow_html=True)
+        if to_remove is not None:
+            removed = st.session_state["qa_pairs"].pop(to_remove)
+            st.session_state.pop(f"qa_q_{removed['id']}", None)
+            st.session_state.pop(f"qa_a_{removed['id']}", None)
+            st.rerun()
+        if st.button("➕  Add another question & answer"):
+            counter = st.session_state.get("qa_counter", len(pairs_meta))
+            st.session_state["qa_pairs"].append({"id": counter})
+            st.session_state["qa_counter"] = counter + 1
+            st.rerun()
+        st.markdown("---")
+        if st.button("✅  Save Unit Entry", type="primary", use_container_width=True):
+            final_src = na_src_detail.strip() if na_src == "Other" else na_src
+            if na_prop.strip() and na_sup not in ["— Select —",""] and final_src and na_by.strip():
+                ensure_supplier(na_sup)
+                if na_main_url.strip():
+                    try:
+                        supabase.table("suppliers").update({"website": na_main_url.strip()}).eq("name", na_sup.strip()).execute()
+                        get_suppliers.clear()
+                    except: pass
+                valid_pairs = []
+                for pair in st.session_state.get("qa_pairs", []):
+                    pid   = pair["id"]
+                    q_val = st.session_state.get(f"qa_q_{pid}", "").strip()
+                    a_val = st.session_state.get(f"qa_a_{pid}", "").strip()
+                    if q_val and a_val:
+                        valid_pairs.append({"q": q_val, "a": a_val})
+                if valid_pairs:
+                    saved = skipped = 0
+                    for p in valid_pairs:
+                        if is_duplicate(na_prop, p["q"], na_vhc): skipped += 1; continue
+                        save_entry(na_vhc, na_prop, p["q"], p["a"], final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url, "unit")
+                        saved += 1
+                    msg = f"✅  Saved {saved} Q&A pair{'s' if saved!=1 else ''} for **{na_prop}**!"
+                    if skipped: msg += f" ({skipped} duplicate{'s' if skipped>1 else ''} skipped)"
+                    st.success(msg)
+                else:
+                    save_entry(na_vhc, na_prop, "", "", final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url, "unit")
+                    st.success(f"✅  Property **{na_prop}** registered!")
+                for pair in st.session_state.get("qa_pairs", []):
+                    pid = pair["id"]
+                    st.session_state.pop(f"qa_q_{pid}", None)
+                    st.session_state.pop(f"qa_a_{pid}", None)
+                st.session_state["qa_pairs"]   = [{"id": 0}]
+                st.session_state["qa_counter"] = 1
+                st.balloons()
             else:
-                st.error("Please fill in: Supplier, Property Name, Source, and Your Name.")
+                if na_src == "Other" and not na_src_detail.strip(): st.error("Please specify the source.")
+                else: st.error("Please fill in: Supplier, Property Name, Source, and Your Name.")
 
-# ══ SUPPLIERS ═════════════════════════════════════════════════════════════════
+    else:
+        st.markdown("""
+<div style='background:#f0fff4;border-left:4px solid #3B6D11;border-radius:0 8px 8px 0;
+     padding:12px 16px;margin-bottom:16px;font-size:13px;'>
+<b>🏢 Supplier Question</b> — Use this when the answer is the same for ALL units from this supplier.<br>
+<span style='color:gray;'>Example: "How do I get check-in instructions?" or "Does this supplier require a rental agreement?"</span>
+</div>
+""", unsafe_allow_html=True)
+        sq_sup = st.selectbox("Supplier *", ["— Select —"] + sup_names + ["+ Type new supplier"], key="sq_sup")
+        if sq_sup == "+ Type new supplier":
+            sq_sup = st.text_input("Type supplier name:", key="sq_sup_txt")
+        sq_src = st.selectbox("Source *", SOURCE_OPTS, key="sq_src")
+        if sq_src == "Other":
+            sq_src_detail = st.text_input("Please specify source *", placeholder="e.g.  Supplier email", key="sq_src_other")
+        else:
+            sq_src_detail = ""
+        sq_by = st.text_input("Your name *", placeholder="e.g.  Maria", key="sq_by")
+        st.markdown("**Questions & answers for this supplier** — *add as many as you need*")
+        if "sq_pairs" not in st.session_state:
+            st.session_state["sq_pairs"]   = [{"id": 0}]
+            st.session_state["sq_counter"] = 1
+        sq_pairs  = st.session_state["sq_pairs"]
+        sq_remove = None
+        for i, pair in enumerate(sq_pairs):
+            pid  = pair["id"]
+            qkey = f"sq_q_{pid}"
+            akey = f"sq_a_{pid}"
+            if qkey not in st.session_state: st.session_state[qkey] = ""
+            if akey not in st.session_state: st.session_state[akey] = ""
+            st.markdown("<div style='background:#f0fff4;border-radius:8px;padding:14px;margin-bottom:10px;'>", unsafe_allow_html=True)
+            sc1, sc2 = st.columns(2)
+            with sc1:
+                st.markdown(f"<div style='font-size:12px;color:gray;margin-bottom:2px;font-weight:500;'>Question {i+1}</div>", unsafe_allow_html=True)
+                st.text_area("SQ", placeholder="e.g.  How do I get check-in instructions?", height=90, key=qkey, label_visibility="collapsed")
+            with sc2:
+                st.markdown(f"<div style='font-size:12px;color:gray;margin-bottom:2px;font-weight:500;'>Answer {i+1}</div>", unsafe_allow_html=True)
+                st.text_area("SA", placeholder="e.g.  Destiny sends instructions 3 days before via email.", height=90, key=akey, label_visibility="collapsed")
+            if len(sq_pairs) > 1:
+                if st.button(f"✕  Remove pair {i+1}", key=f"sq_rm_{pid}"):
+                    sq_remove = i
+            st.markdown("</div>", unsafe_allow_html=True)
+        if sq_remove is not None:
+            removed = st.session_state["sq_pairs"].pop(sq_remove)
+            st.session_state.pop(f"sq_q_{removed['id']}", None)
+            st.session_state.pop(f"sq_a_{removed['id']}", None)
+            st.rerun()
+        if st.button("➕  Add another question & answer", key="sq_add"):
+            counter = st.session_state.get("sq_counter", len(sq_pairs))
+            st.session_state["sq_pairs"].append({"id": counter})
+            st.session_state["sq_counter"] = counter + 1
+            st.rerun()
+        st.markdown("---")
+        if st.button("✅  Save Supplier Entry", type="primary", use_container_width=True):
+            final_src = sq_src_detail.strip() if sq_src == "Other" else sq_src
+            if sq_sup not in ["— Select —",""] and final_src and sq_by.strip():
+                ensure_supplier(sq_sup)
+                valid_sq = []
+                for pair in st.session_state.get("sq_pairs", []):
+                    pid   = pair["id"]
+                    q_val = st.session_state.get(f"sq_q_{pid}", "").strip()
+                    a_val = st.session_state.get(f"sq_a_{pid}", "").strip()
+                    if q_val and a_val: valid_sq.append({"q": q_val, "a": a_val})
+                if valid_sq:
+                    saved = skipped = 0
+                    for p in valid_sq:
+                        if is_duplicate(sq_sup, p["q"], ""): skipped += 1; continue
+                        save_entry("", sq_sup, p["q"], p["a"], final_src, sq_by, sq_sup, "", "", "", "supplier")
+                        saved += 1
+                    msg = f"✅  Saved {saved} supplier Q&A pair{'s' if saved!=1 else ''} for **{sq_sup}**!"
+                    if skipped: msg += f" ({skipped} duplicate{'s' if skipped>1 else ''} skipped)"
+                    st.success(msg)
+                    for pair in st.session_state.get("sq_pairs", []):
+                        pid = pair["id"]
+                        st.session_state.pop(f"sq_q_{pid}", None)
+                        st.session_state.pop(f"sq_a_{pid}", None)
+                    st.session_state["sq_pairs"]   = [{"id": 0}]
+                    st.session_state["sq_counter"] = 1
+                    st.balloons()
+                else:
+                    st.warning("Please fill in at least one question and answer.")
+            else:
+                if sq_src == "Other" and not sq_src_detail.strip(): st.error("Please specify the source.")
+                else: st.error("Please fill in: Supplier, Source, and Your Name.")
+
+
 with tab_suppliers:
     st.subheader("Manage Your Suppliers")
     st.caption("Add suppliers here first — they appear in all dropdowns across the app.")
@@ -839,16 +924,37 @@ with tab_suppliers:
 with tab_view:
     st.subheader("All Knowledge Base Entries")
     sup_names = get_supplier_names()
-    f1,f2,f3 = st.columns(3)
+    f1,f2,f3,f4 = st.columns(4)
     with f1: f_sup  = st.selectbox("Filter by supplier", ["All"] + sup_names)
     with f2: f_cat  = st.selectbox("Filter by category", CAT_OPTS)
-    with f3: f_prop = st.text_input("Search by property name", placeholder="Type to filter...")
+    with f3: f_type = st.selectbox("Filter by type", ["All","🏠 Unit","🏢 Supplier"])
+    with f4: f_prop = st.text_input("Search by property name", placeholder="Type to filter...")
     if st.button("🔄  Refresh"): st.rerun()
 
     rows = supabase.table("knowledge_base").select("*").order("created_at", desc=True).execute().data
-    if f_sup  != "All":  rows = [r for r in rows if r.get("supplier_name","") == f_sup]
-    if f_cat  != "All":  rows = [r for r in rows if r.get("question_category","") == f_cat]
-    if f_prop.strip():   rows = [r for r in rows if f_prop.lower() in (r.get("property_name","") or "").lower()]
+    if f_sup  != "All":       rows = [r for r in rows if r.get("supplier_name","") == f_sup]
+    if f_cat  != "All":       rows = [r for r in rows if r.get("question_category","") == f_cat]
+    if f_type == "🏠 Unit":   rows = [r for r in rows if r.get("knowledge_type","unit") == "unit"]
+    if f_type == "🏢 Supplier": rows = [r for r in rows if r.get("knowledge_type","unit") == "supplier"]
+    if f_prop.strip():        rows = [r for r in rows if f_prop.lower() in (r.get("property_name","") or "").lower()
+                                      or f_prop.lower() in (r.get("supplier_name","") or "").lower()]
+
+    # ── Pagination ──
+    PAGE_SIZE = 50
+    total_rows = len(rows)
+    total_pages = max(1, -(-total_rows // PAGE_SIZE))  # ceiling division
+
+    if "view_page" not in st.session_state: st.session_state["view_page"] = 1
+    # Reset to page 1 when filters change
+    filter_key = f"{f_sup}_{f_cat}_{f_type}_{f_prop}"
+    if st.session_state.get("last_filter_key") != filter_key:
+        st.session_state["view_page"] = 1
+        st.session_state["last_filter_key"] = filter_key
+
+    page = st.session_state["view_page"]
+    start_idx = (page - 1) * PAGE_SIZE
+    end_idx   = start_idx + PAGE_SIZE
+    page_rows = rows[start_idx:end_idx]
 
     if "selected_ids" not in st.session_state: st.session_state["selected_ids"] = set()
     sel = st.session_state["selected_ids"]
@@ -856,13 +962,13 @@ with tab_view:
     ba1,ba2,ba3,ba4 = st.columns([1.5,1.5,2,5])
     with ba1:
         if st.button("☑️  Select all"):
-            st.session_state["selected_ids"] = {r["id"] for r in rows}
-            for r in rows: st.session_state[f"chk_{r['id']}"] = True
+            st.session_state["selected_ids"] = {r["id"] for r in page_rows}
+            for r in page_rows: st.session_state[f"chk_{r['id']}"] = True
             st.rerun()
     with ba2:
         if st.button("⬜  Clear all"):
             st.session_state["selected_ids"] = set()
-            for r in rows: st.session_state[f"chk_{r['id']}"] = False
+            for r in page_rows: st.session_state[f"chk_{r['id']}"] = False
             st.rerun()
     with ba3:
         if sel:
@@ -874,12 +980,28 @@ with tab_view:
     with ba4:
         if sel: st.markdown(f"<span style='color:gray;font-size:13px;'>{len(sel)} selected</span>", unsafe_allow_html=True)
 
-    st.markdown(f"**{len(rows)} entr{'y' if len(rows)==1 else 'ies'} found**")
+    # Pagination controls
+    st.markdown(f"**{total_rows} entr{'y' if total_rows==1 else 'ies'} found — showing page {page} of {total_pages}**")
+    if total_pages > 1:
+        pc1,pc2,pc3,pc4,pc5 = st.columns([1,1,2,1,1])
+        with pc1:
+            if st.button("⏮ First") and page > 1:
+                st.session_state["view_page"] = 1; st.rerun()
+        with pc2:
+            if st.button("◀ Prev") and page > 1:
+                st.session_state["view_page"] = page - 1; st.rerun()
+        with pc3:
+            st.markdown(f"<div style='text-align:center;padding-top:6px;font-size:13px;'>Page {page} of {total_pages}</div>", unsafe_allow_html=True)
+        with pc4:
+            if st.button("Next ▶") and page < total_pages:
+                st.session_state["view_page"] = page + 1; st.rerun()
+        with pc5:
+            if st.button("Last ⏭") and page < total_pages:
+                st.session_state["view_page"] = total_pages; st.rerun()
 
-    if not rows:
+    if not page_rows:
         st.info("No entries yet. Add a supplier, then upload a file or add entries manually.")
     else:
-        # Pre-load supplier websites for fast lookup
         sup_lookup = {s["name"]: s.get("website","") or "" for s in get_suppliers()}
 
         h0,h1,h2,h3,h4,h5 = st.columns([0.4,1.8,2.5,3,1.2,1])
@@ -887,7 +1009,7 @@ with tab_view:
             with h: st.markdown(f"<span style='font-size:11px;color:gray;font-weight:600;'>{lbl}</span>", unsafe_allow_html=True)
         st.markdown("<div style='border-top:2px solid #222;margin:6px 0 4px 0;'></div>", unsafe_allow_html=True)
 
-        for row in rows:
+        for row in page_rows:
             eid      = row["id"]
             edit_key = f"edit_mode_{eid}"
             open_key = f"open_{eid}"
