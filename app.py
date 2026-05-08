@@ -1014,12 +1014,22 @@ with tab_suppliers:
                     if new_ci_when != "— Select —": ci_text += f"Timing: {new_ci_when}. "
                     if new_ci_how  != "— Select —": ci_text += f"Method: {new_ci_how}. "
                     if new_ci_notes.strip():         ci_text += new_ci_notes.strip()
-                    supabase.table("suppliers").insert({
+                    sup_data = {
                         "name":    new_name.strip(),
-                        "supplier_id": new_id if new_id > 0 else None,
                         "website": new_web.strip(),
                         "checkin_instructions": ci_text.strip()
-                    }).execute()
+                    }
+                    if new_id > 0:
+                        sup_data["supplier_id"] = new_id
+                    try:
+                        supabase.table("suppliers").insert(sup_data).execute()
+                    except Exception as e:
+                        if "supplier_id" in str(e).lower():
+                            # Schema cache issue - insert without supplier_id
+                            del sup_data["supplier_id"] if "supplier_id" in sup_data else None
+                            supabase.table("suppliers").insert(sup_data).execute()
+                        else:
+                            raise
                     get_suppliers.clear()
                     st.session_state["sup_form_key"] += 1
                     st.success(f"✅  Added **{new_name}**!")
@@ -1029,30 +1039,57 @@ with tab_suppliers:
             else: st.error("Enter a supplier name.")
     st.markdown("---")
     sups = get_suppliers()
-    st.markdown(f"**{len(sups)} supplier{'s' if len(sups)!=1 else ''}**")
+    st.markdown(f"**{len(sups)} supplier{'s' if len(sups)!=1 else ''}** — Click ✏️ Edit next to any supplier")
     for s in sups:
-        with st.expander(f"🏢  {s['name']}"):
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown(f"**Name:** {s['name']}")
-                web = s.get('website') or ''
-                if web:
-                    st.markdown(f"**Website:** [{web}]({web})")
-                else:
-                    st.markdown("**Website:** —")
-            with c2:
-                st.markdown(f"**Added:** {(s.get('created_at') or '')[:10] or '—'}")
-            ci = s.get('checkin_instructions') or ''
-            if ci:
-                st.markdown(f"**Check-in instructions:** {ci}")
-            else:
-                st.markdown("**Check-in instructions:** —")
+        # Initialize edit state
+        edit_key = f"edit_mode_{s['id']}"
+        if edit_key not in st.session_state:
+            st.session_state[edit_key] = False
 
-            # Edit form for supplier details
+        # Display supplier as a card with info
+        c1, c2, c3 = st.columns([3, 1, 1])
+        with c1:
+            st.markdown(f"### 🏢 {s['name']}")
+            web = s.get('website') or ''
+            sup_id = s.get('supplier_id') or 0
+            ci = s.get('checkin_instructions') or ''
+            
+            info_parts = []
+            if sup_id: info_parts.append(f"**ID:** {sup_id}")
+            if web: info_parts.append(f"**Website:** [{web}]({web})")
+            info_parts.append(f"**Added:** {(s.get('created_at') or '')[:10] or '—'}")
+            if info_parts:
+                st.markdown(" | ".join(info_parts))
+            
+            if ci:
+                st.caption(f"📋 {ci[:100]}{'...' if len(ci) > 100 else ''}")
+
+        with c2:
+            if st.button("✏️ Edit", key=f"edit_btn_{s['id']}", help="Edit this supplier"):
+                st.session_state[edit_key] = not st.session_state[edit_key]
+                st.rerun()
+
+        with c3:
+            if st.button("🗑️", key=f"del_btn_{s['id']}", help="Delete this supplier"):
+                supabase.table("suppliers").delete().eq("id", s["id"]).execute()
+                get_suppliers.clear()
+                st.success(f"Deleted {s['name']}")
+                st.rerun()
+
+        # Show edit form when Edit button is clicked
+        if st.session_state[edit_key]:
+            st.markdown("---")
+            st.markdown(f"**Edit {s['name']}**")
+            
             with st.form(f"edit_sup_{s['id']}"):
-                st.markdown("**Edit Supplier Details**")
                 new_name = st.text_input("Supplier Name", value=s['name'] or "")
-                new_id = st.number_input("Supplier ID (for Sentinel URL construction)", value=s.get('supplier_id') or 0, min_value=0, step=1)
+                new_id = st.number_input(
+                    "Supplier ID (for Sentinel URL construction)",
+                    value=s.get('supplier_id') or 0,
+                    min_value=0,
+                    step=1,
+                    help="Find this in your Sentinel: suppliers/[ID]/properties/..."
+                )
                 new_web = st.text_input("Main Website URL", value=web or "")
                 new_ci = st.text_area("Check-in instructions",
                     value=ci,
@@ -1062,28 +1099,73 @@ with tab_suppliers:
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     if st.form_submit_button("💾  Save changes", type="primary"):
-                        supabase.table("suppliers").update({
+                        sup_data = {
                             "name": new_name.strip(),
-                            "supplier_id": new_id if new_id > 0 else None,
                             "website": new_web.strip(),
                             "checkin_instructions": new_ci.strip()
-                        }).eq("id", s["id"]).execute()
+                        }
+                        if new_id > 0:
+                            sup_data["supplier_id"] = new_id
+                        try:
+                            supabase.table("suppliers").update(sup_data).eq("id", s["id"]).execute()
+                        except Exception as e:
+                            if "supplier_id" in str(e).lower():
+                                if "supplier_id" in sup_data:
+                                    del sup_data["supplier_id"]
+                                supabase.table("suppliers").update(sup_data).eq("id", s["id"]).execute()
+                            else:
+                                raise
                         get_suppliers.clear()
+                        st.session_state[edit_key] = False
                         st.success("Updated!")
                         st.rerun()
                 with col2:
                     if st.form_submit_button("↩️  Cancel"):
+                        st.session_state[edit_key] = False
                         st.rerun()
-                with col3:
-                    if st.form_submit_button("🗑️  Delete supplier", type="secondary"):
-                        supabase.table("suppliers").delete().eq("id", s["id"]).execute()
-                        get_suppliers.clear()
-                        st.success("Deleted.")
-                        st.rerun()
+            st.markdown("---")
 
 # ══ VIEW / EDIT ALL ═══════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=3600)
+def get_all_bedroom_extracted():
+    """Check if we've already extracted bedrooms for existing properties this session"""
+    return True
+
+def extract_all_bedrooms():
+    """Extract bedroom counts from all existing properties that don't have bedroom data"""
+    try:
+        # Get all rows without bedroom data
+        rows = supabase.table("knowledge_base").select("id,property_name").is_("bedrooms", "null").execute().data or []
+        if not rows:
+            return 0
+        
+        updated_count = 0
+        for row in rows:
+            bedrooms = extract_bedrooms(row.get("property_name", ""))
+            if bedrooms:
+                supabase.table("knowledge_base").update({"bedrooms": bedrooms}).eq("id", row["id"]).execute()
+                updated_count += 1
+        return updated_count
+    except Exception as e:
+        st.error(f"Error extracting bedrooms: {e}")
+        return 0
+
+
 with tab_view:
     st.subheader("All Knowledge Base Entries")
+    
+    # Retroactively extract bedrooms for existing properties (one-time operation)
+    if "bedroom_extraction_done" not in st.session_state:
+        with st.spinner("📊 Extracting bedroom information from existing properties..."):
+            updated = extract_all_bedrooms()
+            if updated > 0:
+                st.success(f"✅ Extracted bedroom data for {updated} properties")
+                st.session_state["bedroom_extraction_done"] = True
+                get_suppliers.clear()
+                st.rerun()
+        st.session_state["bedroom_extraction_done"] = True
+    
     sup_names = get_supplier_names()
     f1,f2,f3,f4,f5 = st.columns([1.5, 1.5, 1.5, 1.5, 1.2])
     with f1: f_sup  = st.selectbox("Filter by supplier", ["All"] + sup_names)
