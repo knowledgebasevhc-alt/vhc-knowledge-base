@@ -1026,7 +1026,7 @@ with tab_suppliers:
                     except Exception as e:
                         if "supplier_id" in str(e).lower():
                             # Schema cache issue - insert without supplier_id
-                            del sup_data["supplier_id"] if "supplier_id" in sup_data else None
+                            sup_data.pop("supplier_id", None)
                             supabase.table("suppliers").insert(sup_data).execute()
                         else:
                             raise
