@@ -100,6 +100,24 @@ def categorize(q: str) -> str:
     elif any(w in q for w in ["front desk","concierge","reception"]):           return "Front Desk"
     else:                                                                       return "Other"
 
+def extract_bedrooms(prop_name: str) -> int:
+    """Extract bedroom count from property name using regex"""
+    import re
+    if not prop_name or not isinstance(prop_name, str):
+        return None
+    name_lower = str(prop_name).lower()
+    # Pattern: "3BR" or "3 BR" or "3-BR" or "3 bed"
+    match = re.search(r'(\d+)\s*(?:br|bed|bedroom)', name_lower)
+    if match:
+        return int(match.group(1))
+    return None
+
+def construct_sentinel_url(supplier_id: int, vhc_id: str) -> str:
+    """Build Sentinel URL from supplier ID and VHC ID"""
+    if not supplier_id or not vhc_id:
+        return ""
+    return f"https://sentinel.vacayhomeconnect.com/suppliers/{supplier_id}/properties/{vhc_id}/overview"
+
 # ── Supplier helpers ───────────────────────────────────────────────────────────
 @st.cache_data(ttl=30)
 def get_suppliers():
@@ -132,7 +150,7 @@ def badge_style(name: str) -> str:
 # ── DB helpers ─────────────────────────────────────────────────────────────────
 def save_entry(vhc_id, property_name, question, answer, source, added_by,
                supplier_name="", unit_label="", supplier_url="", sentinel_url="",
-               knowledge_type="unit"):
+               knowledge_type="unit", bedrooms=None):
     supabase.table("knowledge_base").insert({
         "vhc_id":            vhc_id or "",
         "unit_label":        unit_label or "",
@@ -146,6 +164,7 @@ def save_entry(vhc_id, property_name, question, answer, source, added_by,
         "supplier_url":      supplier_url or "",
         "sentinel_url":      sentinel_url or "",
         "knowledge_type":    knowledge_type or "unit",
+        "bedrooms":          bedrooms,
         "updated_at":        datetime.utcnow().isoformat()
     }).execute()
 
@@ -726,6 +745,12 @@ with tab_upload:
             if top_save or bottom_save:
                 saved = skipped = 0
                 ensure_supplier(supplier)  # Auto-create supplier if it doesn't exist
+                
+                # Get supplier info for Sentinel URL construction
+                all_suppliers = supabase.table("suppliers").select("*").execute().data or []
+                supplier_info = next((s for s in all_suppliers if s.get("name") == supplier), None)
+                supplier_id = supplier_info.get("supplier_id") if supplier_info else None
+                
                 for e in valid:
                     prop = e.get("property_name","")
                     q    = e.get("question","")
@@ -734,7 +759,10 @@ with tab_upload:
                         skipped += 1; continue
                     try:
                         k_type = "supplier" if "🏢" in st.session_state.get(f"up_type_{st.session_state.get('up_form_key',0)}", "") else "unit"
-                        save_entry(vhc, prop, q, e.get("answer",""), f"File: {filename}", by, supplier, e.get("unit_label",""), "", "", k_type)
+                        # Extract bedrooms and construct Sentinel URL
+                        bedrooms = extract_bedrooms(prop)
+                        sent_url = construct_sentinel_url(supplier_id, vhc) if supplier_id and vhc else ""
+                        save_entry(vhc, prop, q, e.get("answer",""), f"File: {filename}", by, supplier, e.get("unit_label",""), "", sent_url, k_type, bedrooms)
                         saved += 1
                     except Exception as ex: st.error(f"Error: {ex}")
                 register_file(fhash, filename, supplier, by)
@@ -844,15 +872,17 @@ with tab_add:
                         valid_pairs.append({"q": q_val, "a": a_val})
                 if valid_pairs:
                     saved = skipped = 0
+                    bedrooms = extract_bedrooms(na_prop)  # Extract from property name
                     for p in valid_pairs:
                         if is_duplicate(na_prop, p["q"], na_vhc): skipped += 1; continue
-                        save_entry(na_vhc, na_prop, p["q"], p["a"], final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url, "unit")
+                        save_entry(na_vhc, na_prop, p["q"], p["a"], final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url, "unit", bedrooms)
                         saved += 1
                     msg = f"✅  Saved {saved} Q&A pair{'s' if saved!=1 else ''} for **{na_prop}**!"
                     if skipped: msg += f" ({skipped} duplicate{'s' if skipped>1 else ''} skipped)"
                     st.success(msg)
                 else:
-                    save_entry(na_vhc, na_prop, "", "", final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url, "unit")
+                    bedrooms = extract_bedrooms(na_prop)  # Extract from property name
+                    save_entry(na_vhc, na_prop, "", "", final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url, "unit", bedrooms)
                     st.success(f"✅  Property **{na_prop}** registered!")
                 for pair in st.session_state.get("qa_pairs", []):
                     pid = pair["id"]
@@ -957,9 +987,10 @@ with tab_suppliers:
         st.session_state["sup_form_key"] = 0
 
     with st.form(f"add_sup_form_{st.session_state['sup_form_key']}"):
-        fc1, fc2 = st.columns(2)
+        fc1, fc2, fc3 = st.columns(3)
         with fc1: new_name = st.text_input("Supplier Name *", placeholder="e.g.  Blue Swell Rentals")
-        with fc2: new_web  = st.text_input("Main Website URL", placeholder="e.g.  https://blueswellrentals.com")
+        with fc2: new_id   = st.number_input("Supplier ID", value=0, min_value=0, step=1, help="For Sentinel URL: suppliers/ID/properties/...")
+        with fc3: new_web  = st.text_input("Main Website URL", placeholder="e.g.  https://blueswellrentals.com")
         new_ci_when = st.selectbox("When are check-in instructions sent?", [
             "— Select —",
             "Day of check-in",
@@ -985,6 +1016,7 @@ with tab_suppliers:
                     if new_ci_notes.strip():         ci_text += new_ci_notes.strip()
                     supabase.table("suppliers").insert({
                         "name":    new_name.strip(),
+                        "supplier_id": new_id if new_id > 0 else None,
                         "website": new_web.strip(),
                         "checkin_instructions": ci_text.strip()
                     }).execute()
@@ -1020,6 +1052,7 @@ with tab_suppliers:
             with st.form(f"edit_sup_{s['id']}"):
                 st.markdown("**Edit Supplier Details**")
                 new_name = st.text_input("Supplier Name", value=s['name'] or "")
+                new_id = st.number_input("Supplier ID (for Sentinel URL construction)", value=s.get('supplier_id') or 0, min_value=0, step=1)
                 new_web = st.text_input("Main Website URL", value=web or "")
                 new_ci = st.text_area("Check-in instructions",
                     value=ci,
@@ -1031,6 +1064,7 @@ with tab_suppliers:
                     if st.form_submit_button("💾  Save changes", type="primary"):
                         supabase.table("suppliers").update({
                             "name": new_name.strip(),
+                            "supplier_id": new_id if new_id > 0 else None,
                             "website": new_web.strip(),
                             "checkin_instructions": new_ci.strip()
                         }).eq("id", s["id"]).execute()
@@ -1051,11 +1085,12 @@ with tab_suppliers:
 with tab_view:
     st.subheader("All Knowledge Base Entries")
     sup_names = get_supplier_names()
-    f1,f2,f3,f4 = st.columns(4)
+    f1,f2,f3,f4,f5 = st.columns([1.5, 1.5, 1.5, 1.5, 1.2])
     with f1: f_sup  = st.selectbox("Filter by supplier", ["All"] + sup_names)
     with f2: f_cat  = st.selectbox("Filter by category", CAT_OPTS)
     with f3: f_type = st.selectbox("Filter by type", ["All","🏠 Unit","🏢 Supplier"])
-    with f4: f_prop = st.text_input("Search by property name", placeholder="Type to filter...")
+    with f4: f_bed  = st.selectbox("Filter by bedrooms", ["All","1BR","2BR","3BR","4BR","5BR","6BR+"])
+    with f5: f_prop = st.text_input("Search", placeholder="Property name...")
     if st.button("🔄  Refresh"): st.rerun()
 
     rows = supabase.table("knowledge_base").select("*").order("created_at", desc=True).execute().data
@@ -1063,6 +1098,12 @@ with tab_view:
     if f_cat  != "All":       rows = [r for r in rows if r.get("question_category","") == f_cat]
     if f_type == "🏠 Unit":   rows = [r for r in rows if r.get("knowledge_type","unit") == "unit"]
     if f_type == "🏢 Supplier": rows = [r for r in rows if r.get("knowledge_type","unit") == "supplier"]
+    if f_bed  != "All":
+        target_bed = int(f_bed[0]) if f_bed != "6BR+" else 6
+        if f_bed == "6BR+":
+            rows = [r for r in rows if (r.get("bedrooms") or 0) >= 6]
+        else:
+            rows = [r for r in rows if r.get("bedrooms") == target_bed]
     if f_prop.strip():        rows = [r for r in rows if f_prop.lower() in (r.get("property_name","") or "").lower()
                                       or f_prop.lower() in (r.get("supplier_name","") or "").lower()]
 
@@ -1073,7 +1114,7 @@ with tab_view:
 
     if "view_page" not in st.session_state: st.session_state["view_page"] = 1
     # Reset to page 1 when filters change
-    filter_key = f"{f_sup}_{f_cat}_{f_type}_{f_prop}"
+    filter_key = f"{f_sup}_{f_cat}_{f_type}_{f_bed}_{f_prop}"
     if st.session_state.get("last_filter_key") != filter_key:
         st.session_state["view_page"] = 1
         st.session_state["last_filter_key"] = filter_key
@@ -1317,7 +1358,7 @@ with tab_view:
                             "property_name": e_prop,    "question":     e_q,
                             "answer":        e_ans,     "source":       final_src,
                             "added_by":      e_by,      "supplier_url": e_sup_url,
-                            "sentinel_url":  e_sent_url,
+                            "sentinel_url":  e_sent_url, "bedrooms":     extract_bedrooms(e_prop),
                         })
                         # Save any additional pairs as new entries
                         for ep in st.session_state[epairs_key][1:]:
@@ -1327,7 +1368,7 @@ with tab_view:
                             if extra_q and extra_a:
                                 save_entry(e_vhc, e_prop, extra_q, extra_a, final_src, e_by,
                                            e_sup if e_sup not in ["— Select —",""] else "",
-                                           e_unit, e_sup_url, e_sent_url)
+                                           e_unit, e_sup_url, e_sent_url, "unit", extract_bedrooms(e_prop))
                         # Clean up edit session state
                         for ep in st.session_state.get(epairs_key, []):
                             epid = ep["id"]
