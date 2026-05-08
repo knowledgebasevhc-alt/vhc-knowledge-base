@@ -369,30 +369,36 @@ tab_search, tab_upload, tab_add, tab_suppliers, tab_view = st.tabs([
 # ══ SEARCH ════════════════════════════════════════════════════════════════════
 with tab_search:
     st.markdown("### What would you like to know?")
-    st.markdown("<span style='font-size:14px;color:gray;'>Type a question in plain English — use the property name, address, or VHC ID.</span>", unsafe_allow_html=True)
+    st.markdown("<span style='font-size:14px;color:gray;'>Type a question in plain English — use the property name, address, or VHC ID. Press Enter or click Search.</span>", unsafe_allow_html=True)
     st.markdown("")
 
-    # Pre-fill from example chip clicks
+    # Initialize search state
     if "search_prefill" not in st.session_state:
         st.session_state["search_prefill"] = ""
+    if "current_search_query" not in st.session_state:
+        st.session_state["current_search_query"] = ""
+    if "search_results_expanded" not in st.session_state:
+        st.session_state["search_results_expanded"] = {}
 
-    query = st.text_input(
-        "Your question",
-        value=st.session_state["search_prefill"],
-        placeholder="e.g.  Does Mountain River Chalet have air conditioning?  |  What is the pet fee for VHC 410966?",
-        label_visibility="collapsed"
-    )
+    # Use a form to enable Enter key support
+    with st.form("search_form", clear_on_submit=False):
+        query = st.text_input(
+            "Your question",
+            value=st.session_state.get("current_search_query", ""),
+            placeholder="e.g.  Does Mountain River Chalet have air conditioning?  |  What is the pet fee for VHC 410966?",
+            label_visibility="collapsed"
+        )
 
-    sup_names = get_supplier_names()
-    c1, c2 = st.columns([2,3])
-    with c1:
-        sel_sup = st.selectbox("Filter by supplier (optional)", ["All suppliers"] + sup_names, key="s_sup")
-    with c2:
-        auto_web = get_supplier_website(sel_sup) if sel_sup != "All suppliers" else ""
-        with st.expander("🌐  Add supplier website to search automatically if not found"):
-            sup_url = st.text_input("Supplier website URL", value=auto_web, placeholder="https://www.blueswellrentals.com", key="sup_url_search")
+        sup_names = get_supplier_names()
+        c1, c2 = st.columns([2,3])
+        with c1:
+            sel_sup = st.selectbox("Filter by supplier (optional)", ["All suppliers"] + sup_names, key="s_sup")
+        with c2:
+            auto_web = get_supplier_website(sel_sup) if sel_sup != "All suppliers" else ""
+            with st.expander("🌐  Add supplier website to search automatically if not found"):
+                sup_url = st.text_input("Supplier website URL", value=auto_web, placeholder="https://www.blueswellrentals.com", key="sup_url_search")
 
-    search_clicked = st.button("🔍  Search Knowledge Base", type="primary", use_container_width=True)
+        search_clicked = st.form_submit_button("🔍  Search Knowledge Base", type="primary", use_container_width=True)
 
     # Example chips
     st.markdown("<div style='margin-top:12px;font-size:12px;color:gray;font-weight:500;'>Common questions to try:</div>", unsafe_allow_html=True)
@@ -400,12 +406,13 @@ with tab_search:
     for i, eq in enumerate(EXAMPLE_QS):
         with chip_cols[i % 4]:
             if st.button(eq, key=f"chip_{i}", use_container_width=True):
-                st.session_state["search_prefill"] = eq
+                st.session_state["current_search_query"] = eq
                 st.rerun()
 
     st.markdown("---")
 
     if search_clicked and query.strip():
+        st.session_state["current_search_query"] = query
         st.session_state["search_prefill"] = ""
         with st.spinner("Searching knowledge base..."):
             result = search_kb(query)
@@ -1009,25 +1016,32 @@ with tab_suppliers:
             else:
                 st.markdown("**Check-in instructions:** —")
 
-            # Edit check-in instructions inline
-            with st.form(f"edit_ci_{s['id']}"):
-                new_ci = st.text_area("Update check-in instructions",
+            # Edit form for supplier details
+            with st.form(f"edit_sup_{s['id']}"):
+                st.markdown("**Edit Supplier Details**")
+                new_name = st.text_input("Supplier Name", value=s['name'] or "")
+                new_web = st.text_input("Main Website URL", value=web or "")
+                new_ci = st.text_area("Check-in instructions",
                     value=ci,
                     placeholder="e.g.  Timing: 3 days before. Method: Email. Lockbox code sent via email.",
-                    height=80, label_visibility="visible")
-                new_web_edit = st.text_input("Update website URL", value=web or "")
-                col1, col2 = st.columns(2)
+                    height=80)
+                
+                col1, col2, col3 = st.columns(3)
                 with col1:
-                    if st.form_submit_button("💾  Save changes"):
+                    if st.form_submit_button("💾  Save changes", type="primary"):
                         supabase.table("suppliers").update({
-                            "checkin_instructions": new_ci.strip(),
-                            "website": new_web_edit.strip()
+                            "name": new_name.strip(),
+                            "website": new_web.strip(),
+                            "checkin_instructions": new_ci.strip()
                         }).eq("id", s["id"]).execute()
                         get_suppliers.clear()
                         st.success("Updated!")
                         st.rerun()
                 with col2:
-                    if st.form_submit_button("🗑️  Delete supplier"):
+                    if st.form_submit_button("↩️  Cancel"):
+                        st.rerun()
+                with col3:
+                    if st.form_submit_button("🗑️  Delete supplier", type="secondary"):
                         supabase.table("suppliers").delete().eq("id", s["id"]).execute()
                         get_suppliers.clear()
                         st.success("Deleted.")
