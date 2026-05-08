@@ -629,9 +629,10 @@ with tab_upload:
             up_sup = st.text_input("Type supplier name:", key=f"up_sup_new_{st.session_state['up_form_key']}")
         up_type = st.radio(
             "What type of information is in this file?",
-            ["🏠  Unit Q&A — specific to individual properties",
+            ["📋  Property List — register new units only (no Q&A)",
+             "🏠  Unit Q&A — questions & answers for specific properties",
              "🏢  Supplier Q&A — applies to all units from this supplier"],
-            horizontal=True,
+            horizontal=False,
             key=f"up_type_{st.session_state['up_form_key']}"
         )
         up_file = st.file_uploader("Choose a file", type=["csv","xlsx","xls","txt","pdf","docx","md"],
