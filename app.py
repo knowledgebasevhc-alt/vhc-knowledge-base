@@ -500,10 +500,21 @@ You can contact the supplier to find out, then save the answer using <b>Add Entr
                         cat
                     ]))
 
-                    st.markdown(f"""
+                    # Make result clickable with a button
+                    expand_key = f"search_expand_{mrow['id']}"
+                    if "search_results_expanded" not in st.session_state:
+                        st.session_state["search_results_expanded"] = {}
+
+                    if st.button(f"🏠 {prop}", key=f"search_btn_{mrow['id']}", help="Click to view full details"):
+                        if expand_key not in st.session_state["search_results_expanded"]:
+                            st.session_state["search_results_expanded"][expand_key] = False
+                        st.session_state["search_results_expanded"][expand_key] = not st.session_state["search_results_expanded"][expand_key]
+                        st.rerun()
+
+                    if st.session_state["search_results_expanded"].get(expand_key, False):
+                        st.markdown(f"""
 <div style='background:#f8f9fa;border-left:4px solid #3B6D11;border-radius:0 10px 10px 0;
-     padding:18px 22px;margin:12px 0;cursor:pointer;'>
-  <div style='font-size:16px;font-weight:600;color:#1a1a1a;margin-bottom:6px;'>🏠 {prop}</div>
+     padding:18px 22px;margin:12px 0;'>
   <div style='font-size:12px;color:gray;margin-bottom:12px;'>{sub_parts}</div>
   <div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:13px;margin-bottom:12px;'>
     <div><b>Source:</b> {src}</div>
@@ -516,7 +527,10 @@ You can contact the supplier to find out, then save the answer using <b>Add Entr
    '<div style="font-size:12px;color:gray;font-weight:500;margin-bottom:4px;">ANSWER</div>'
    '<div style="font-size:14px;">'+a_txt+'</div>'
    '</div>' if q_txt else ''}
-  {'<div style="padding-top:10px;border-top:0.5px solid #ddd;">'+links_html+'</div>' if links_html else ''}
+  {'<div style="padding-top:10px;border-top:0.5px solid #ddd;"><a href="'+sup_main+'" target="_blank" style="font-size:13px;margin-right:16px;text-decoration:none;"><u><b>Supplier Website</b></u></a>' + 
+   ('<a href="'+sup_lnk+'" target="_blank" style="font-size:13px;margin-right:16px;text-decoration:none;">🔗 View on supplier site</a>' if sup_lnk else '') + 
+   ('<a href="'+sent_lnk+'" target="_blank" style="font-size:13px;text-decoration:none;">🔗 View in Sentinel</a>' if sent_lnk else '') + 
+   '</div>' if sup_main or sup_lnk or sent_lnk else ''}
 </div>
 """, unsafe_allow_html=True)
 
@@ -583,8 +597,10 @@ with tab_upload:
             st.session_state["up_form_key"] = 0
 
         up_sup  = st.selectbox("Which supplier does this file belong to? *",
-                               ["— Select —"] + sup_names,
+                               ["— Select —"] + sup_names + ["+ Type new supplier"],
                                key=f"up_sup_{st.session_state['up_form_key']}")
+        if up_sup == "+ Type new supplier":
+            up_sup = st.text_input("Type supplier name:", key=f"up_sup_new_{st.session_state['up_form_key']}")
         up_type = st.radio(
             "What type of information is in this file?",
             ["🏠  Unit Q&A — specific to individual properties",
@@ -702,6 +718,7 @@ with tab_upload:
 
             if top_save or bottom_save:
                 saved = skipped = 0
+                ensure_supplier(supplier)  # Auto-create supplier if it doesn't exist
                 for e in valid:
                     prop = e.get("property_name","")
                     q    = e.get("question","")
@@ -1145,7 +1162,7 @@ with tab_view:
                     sup_main = sup_lookup.get(sup, "")
                     row_links = []
                     if sub:      row_links.insert(0, f"<span style='font-size:10px;color:gray;'>{sub}</span>")
-                    if sup_main: row_links.append(f"<a href='{sup_main}' target='_blank' style='font-size:10px;'>🌐</a>")
+                    if sup_main: row_links.append(f"<a href='{sup_main}' target='_blank' style='font-size:11px;'><u><b>Supplier Website</b></u></a>")
                     if sup_lnk:  row_links.append(f"<a href='{sup_lnk}'  target='_blank' style='font-size:10px;'>🔗 Prop</a>")
                     if sent_lnk: row_links.append(f"<a href='{sent_lnk}' target='_blank' style='font-size:10px;'>🔗 Sent</a>")
                     if row_links:
@@ -1174,7 +1191,7 @@ with tab_view:
                 if st.session_state[open_key]:
                     sup_main = get_supplier_website(sup) if sup else ""
                     links_html = ""
-                    if sup_main:  links_html += f"<a href='{sup_main}' target='_blank' style='font-size:13px;margin-right:16px;'>🌐 {sup} main website</a>"
+                    if sup_main:  links_html += f"<a href='{sup_main}' target='_blank' style='font-size:13px;margin-right:16px;'><u><b>Supplier Website</b></u></a>"
                     if sup_lnk:  links_html += f"<a href='{sup_lnk}'  target='_blank' style='font-size:13px;margin-right:16px;'>🔗 View on supplier site</a>"
                     if sent_lnk: links_html += f"<a href='{sent_lnk}' target='_blank' style='font-size:13px;'>🔗 View in Sentinel</a>"
 
