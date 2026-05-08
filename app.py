@@ -1040,13 +1040,18 @@ with tab_suppliers:
     st.markdown("---")
     sups = get_suppliers()
     st.markdown(f"**{len(sups)} supplier{'s' if len(sups)!=1 else ''}** — Click ✏️ Edit next to any supplier")
-    for s in sups:
+    for i, s in enumerate(sups):
         # Initialize edit state
         edit_key = f"edit_mode_{s['id']}"
         if edit_key not in st.session_state:
             st.session_state[edit_key] = False
 
         # Display supplier as a card with info
+        st.markdown(f"""
+<div style='background:#f8f9fa;border:1px solid #e0e0e0;border-radius:8px;
+     padding:16px;margin-bottom:16px;'>
+""", unsafe_allow_html=True)
+        
         c1, c2, c3 = st.columns([3, 1, 1])
         with c1:
             st.markdown(f"### 🏢 {s['name']}")
@@ -1076,9 +1081,14 @@ with tab_suppliers:
                 st.success(f"Deleted {s['name']}")
                 st.rerun()
 
+        st.markdown("</div>", unsafe_allow_html=True)
+
         # Show edit form when Edit button is clicked
         if st.session_state[edit_key]:
-            st.markdown("---")
+            st.markdown("""
+<div style='background:#f0f7ff;border-left:4px solid #4A90D9;border-radius:0 8px 8px 0;
+     padding:16px;margin:16px 0;'>
+""", unsafe_allow_html=True)
             st.markdown(f"**Edit {s['name']}**")
             
             with st.form(f"edit_sup_{s['id']}"):
@@ -1110,8 +1120,7 @@ with tab_suppliers:
                             supabase.table("suppliers").update(sup_data).eq("id", s["id"]).execute()
                         except Exception as e:
                             if "supplier_id" in str(e).lower():
-                                if "supplier_id" in sup_data:
-                                    del sup_data["supplier_id"]
+                                sup_data.pop("supplier_id", None)
                                 supabase.table("suppliers").update(sup_data).eq("id", s["id"]).execute()
                             else:
                                 raise
@@ -1123,7 +1132,7 @@ with tab_suppliers:
                     if st.form_submit_button("↩️  Cancel"):
                         st.session_state[edit_key] = False
                         st.rerun()
-            st.markdown("---")
+            st.markdown("</div>", unsafe_allow_html=True)
 
 # ══ VIEW / EDIT ALL ═══════════════════════════════════════════════════════════
 
