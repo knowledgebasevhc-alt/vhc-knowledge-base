@@ -9,11 +9,198 @@ import pandas as pd
 
 st.set_page_config(page_title="VHC Knowledge Base", page_icon="🏠", layout="wide")
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CORPORATE PROFESSIONAL DESIGN THEME
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown("""
+<style>
+/* Corporate Professional Color Scheme */
+:root {
+    --corporate-navy: #1a3a52;
+    --corporate-teal: #00897b;
+    --corporate-success: #4caf50;
+    --corporate-danger: #e74c3c;
+    --corporate-gray: #f5f5f5;
+    --corporate-border: #e0e0e0;
+}
+
+/* Main app container */
+.main .block-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+    max-width: 1200px;
+}
+
+/* Headers and titles */
+h1, h2, h3 {
+    color: var(--corporate-navy) !important;
+    font-weight: 500 !important;
+}
+
+h1 { font-size: 28px !important; }
+h2 { font-size: 20px !important; }
+h3 { font-size: 18px !important; }
+
+/* Tabs - Corporate style */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 8px;
+    background-color: white;
+    border-bottom: 2px solid var(--corporate-border);
+    padding: 0;
+}
+
+.stTabs [data-baseweb="tab"] {
+    height: 50px;
+    background-color: white;
+    border: 1px solid var(--corporate-border);
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    color: #666;
+    padding: 0 24px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.stTabs [aria-selected="true"] {
+    background-color: var(--corporate-navy) !important;
+    color: white !important;
+    border-color: var(--corporate-navy) !important;
+}
+
+/* Buttons - Teal primary action */
+.stButton > button {
+    background-color: var(--corporate-teal) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 4px !important;
+    padding: 12px 24px !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    transition: background-color 0.2s;
+}
+
+.stButton > button:hover {
+    background-color: #007567 !important;
+}
+
+/* Secondary buttons */
+.stButton > button[kind="secondary"] {
+    background-color: white !important;
+    color: var(--corporate-navy) !important;
+    border: 1px solid var(--corporate-border) !important;
+}
+
+/* Text inputs */
+.stTextInput > div > div > input,
+.stTextArea textarea,
+.stSelectbox > div > div > div {
+    border: 1px solid #ccc !important;
+    border-radius: 4px !important;
+    padding: 10px 12px !important;
+    font-size: 14px !important;
+}
+
+.stTextInput > div > div > input:focus,
+.stTextArea textarea:focus {
+    border-color: var(--corporate-teal) !important;
+    box-shadow: 0 0 0 1px var(--corporate-teal) !important;
+}
+
+/* Labels */
+.stTextInput > label,
+.stTextArea > label,
+.stSelectbox > label,
+.stFileUploader > label,
+.stNumberInput > label {
+    color: var(--corporate-navy) !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    margin-bottom: 8px !important;
+}
+
+/* Info/warning/success boxes */
+.stAlert {
+    border-radius: 4px !important;
+    border-left: 4px solid !important;
+}
+
+[data-baseweb="notification"] > div {
+    border-radius: 4px !important;
+}
+
+/* Success messages */
+.stSuccess {
+    background-color: #e8f5e9 !important;
+    border-left-color: var(--corporate-success) !important;
+}
+
+/* Cards and expanders */
+.streamlit-expanderHeader {
+    background-color: var(--corporate-gray) !important;
+    border: 1px solid var(--corporate-border) !important;
+    border-radius: 4px !important;
+    color: var(--corporate-navy) !important;
+    font-weight: 500 !important;
+}
+
+/* File uploader */
+.stFileUploader {
+    border: 1px dashed #ccc !important;
+    border-radius: 4px !important;
+    padding: 20px !important;
+}
+
+/* Radio buttons */
+.stRadio > div {
+    gap: 12px;
+}
+
+.stRadio > div > label {
+    background-color: var(--corporate-gray) !important;
+    border: 1px solid var(--corporate-border) !important;
+    border-radius: 4px !important;
+    padding: 12px 16px !important;
+    cursor: pointer;
+}
+
+/* Selectbox */
+.stSelectbox > div > div {
+    border-radius: 4px !important;
+}
+
+/* Markdown within cards */
+.element-container {
+    margin-bottom: 1rem;
+}
+
+/* Forms */
+.stForm {
+    background-color: var(--corporate-gray);
+    border: 1px solid var(--corporate-border);
+    border-radius: 8px;
+    padding: 1.5rem;
+}
+
+/* Spacing improvements */
+.stMarkdown {
+    margin-bottom: 0.5rem;
+}
+
+/* Number input */
+.stNumberInput > div > div > input {
+    border: 1px solid #ccc !important;
+    border-radius: 4px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # ── Custom CSS ─────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 .big-search input {font-size:18px !important; padding:14px !important;}
-.green-result {border-left:4px solid #3B6D11;padding:16px 20px;background:var(--background-color);border-radius:0 8px 8px 0;margin:8px 0;}
+.green-result {border-left:4px solid #00897b;padding:16px 20px;background:var(--background-color);border-radius:0 8px 8px 0;margin:8px 0;}
 .result-tag {font-size:11px;font-weight:600;color:#3B6D11;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px;}
 .result-body {font-size:16px;line-height:1.65;}
 .tip-box {padding:12px 16px;border:1px solid #ddd;border-radius:8px;font-size:13px;color:#888;margin-top:12px;}
@@ -448,14 +635,14 @@ with tab_search:
             sup_lookup_s = {s["name"]: s.get("website","") or "" for s in get_suppliers()}
             sup_main = sup_lookup_s.get(sup,"")
             st.markdown(f"""
-<div style='background:#fff8e1;border-left:4px solid #f59e0b;border-radius:0 8px 8px 0;padding:14px 18px;margin:8px 0;'>
-<div style='font-size:15px;font-weight:600;margin-bottom:8px;'>🏠 {pname}</div>
-<div style='font-size:13px;color:gray;margin-bottom:10px;'>
+<div style='background:#f5f5f5;border-left:4px solid #1a3a52;border-radius:0 4px 4px 0;padding:14px 18px;margin:8px 0;border:1px solid #e0e0e0;'>
+<div style='font-size:15px;font-weight:600;margin-bottom:8px;color:#1a3a52;'>🏠 {pname}</div>
+<div style='font-size:13px;color:#666;margin-bottom:10px;'>
 {"Supplier: "+sup+" &nbsp;·&nbsp; " if sup else ""}{"VHC: "+vhc if vhc else ""}
 </div>
-<div style='font-size:13px;'>We don't have this information saved yet.
+<div style='font-size:13px;color:#333;'>We don't have this information saved yet.
 You can contact the supplier to find out, then save the answer using <b>Add Entry</b>.</div>
-{"<div style='margin-top:10px;'>"+"".join([f"<a href='{l}' target='_blank' style='font-size:12px;margin-right:16px;'>"+n+"</a>" for l,n in [(sup_main,"🌐 Supplier website"),(slnk,"🔗 Property page"),(senlnk,"🔗 Sentinel")] if l])+"</div>" if any([sup_main,slnk,senlnk]) else ""}
+{"<div style='margin-top:10px;'>"+"".join([f"<a href='{l}' target='_blank' style='font-size:12px;margin-right:16px;color:#00897b;text-decoration:underline;'>"+n+"</a>" for l,n in [(sup_main,"<b><u>Supplier Website</u></b>"),(slnk,"🔗 Property page"),(senlnk,"🔗 Sentinel")] if l])+"</div>" if any([sup_main,slnk,senlnk]) else ""}
 </div>
 """, unsafe_allow_html=True)
             st.markdown("<div class='tip-box'>Once you get the answer, go to <strong>Add Entry → Unit Question</strong> to save it permanently.</div>", unsafe_allow_html=True)
@@ -515,9 +702,9 @@ You can contact the supplier to find out, then save the answer using <b>Add Entr
                     date     = (mrow.get("created_at","") or "")[:10]
 
                     links_html = ""
-                    if sup_main:  links_html += f"<a href='{sup_main}' target='_blank' style='font-size:13px;margin-right:16px;text-decoration:none;'>🌐 {sup} main website</a>"
-                    if sup_lnk:  links_html += f"<a href='{sup_lnk}'  target='_blank' style='font-size:13px;margin-right:16px;text-decoration:none;'>🔗 View on supplier site</a>"
-                    if sent_lnk: links_html += f"<a href='{sent_lnk}' target='_blank' style='font-size:13px;text-decoration:none;'>🔗 View in Sentinel</a>"
+                    if sup_main:  links_html += f"<a href='{sup_main}' target='_blank' style='font-size:13px;margin-right:16px;text-decoration:none;color:#00897b;'><u><b>Supplier Website</b></u></a>"
+                    if sup_lnk:  links_html += f"<a href='{sup_lnk}'  target='_blank' style='font-size:13px;margin-right:16px;text-decoration:none;color:#00897b;'>🔗 View on supplier site</a>"
+                    if sent_lnk: links_html += f"<a href='{sent_lnk}' target='_blank' style='font-size:13px;text-decoration:none;color:#00897b;'>🔗 View in Sentinel</a>"
 
                     sub_parts = " &nbsp;·&nbsp; ".join(filter(None,[
                         f"VHC: {vhc}"   if vhc  else "",
@@ -539,7 +726,7 @@ You can contact the supplier to find out, then save the answer using <b>Add Entr
 
                     if st.session_state["search_results_expanded"].get(expand_key, False):
                         st.markdown(f"""
-<div style='background:#f8f9fa;border-left:4px solid #3B6D11;border-radius:0 10px 10px 0;
+<div style='background:#f8f9fa;border-left:4px solid #00897b;border-radius:0 10px 10px 0;
      padding:18px 22px;margin:12px 0;'>
   <div style='font-size:12px;color:gray;margin-bottom:12px;'>{sub_parts}</div>
   <div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:13px;margin-bottom:12px;'>
@@ -794,7 +981,7 @@ with tab_add:
 
     if "🏠" in add_type:
         st.markdown("""
-<div style='background:#f0f7ff;border-left:4px solid #4A90D9;border-radius:0 8px 8px 0;
+<div style='background:#f5f5f5;border-left:4px solid #1a3a52;border-radius:0 8px 8px 0;
      padding:12px 16px;margin-bottom:16px;font-size:13px;'>
 <b>🏠 Unit Question</b> — Use this when the answer only applies to ONE specific property.<br>
 <span style='color:gray;'>Example: "Does unit 207 have a fenced yard?" or "Is the pool at 66 Snapper heated?"</span>
@@ -898,7 +1085,7 @@ with tab_add:
 
     else:
         st.markdown("""
-<div style='background:#f0fff4;border-left:4px solid #3B6D11;border-radius:0 8px 8px 0;
+<div style='background:#f5f5f5;border-left:4px solid #00897b;border-radius:0 8px 8px 0;
      padding:12px 16px;margin-bottom:16px;font-size:13px;'>
 <b>🏢 Supplier Question</b> — Use this when the answer is the same for ALL units from this supplier.<br>
 <span style='color:gray;'>Example: "How do I get check-in instructions?" or "Does this supplier require a rental agreement?"</span>
@@ -1049,7 +1236,7 @@ with tab_suppliers:
 
         # Display supplier as a card with info
         st.markdown(f"""
-<div style='background:#f8f9fa;border:1px solid #e0e0e0;border-radius:8px;
+<div style='background:#f5f5f5;border:1px solid #e0e0e0;border-radius:8px;
      padding:16px;margin-bottom:16px;'>
 """, unsafe_allow_html=True)
         
@@ -1087,7 +1274,7 @@ with tab_suppliers:
         # Show edit form when Edit button is clicked
         if st.session_state[edit_key]:
             st.markdown("""
-<div style='background:#f0f7ff;border-left:4px solid #4A90D9;border-radius:0 8px 8px 0;
+<div style='background:#f5f5f5;border-left:4px solid #1a3a52;border-radius:0 8px 8px 0;
      padding:16px;margin:16px 0;'>
 """, unsafe_allow_html=True)
             st.markdown(f"**Edit {s['name']}**")
@@ -1338,9 +1525,9 @@ with tab_view:
                 if st.session_state[open_key]:
                     sup_main = get_supplier_website(sup) if sup else ""
                     links_html = ""
-                    if sup_main:  links_html += f"<a href='{sup_main}' target='_blank' style='font-size:13px;margin-right:16px;'><u><b>Supplier Website</b></u></a>"
-                    if sup_lnk:  links_html += f"<a href='{sup_lnk}'  target='_blank' style='font-size:13px;margin-right:16px;'>🔗 View on supplier site</a>"
-                    if sent_lnk: links_html += f"<a href='{sent_lnk}' target='_blank' style='font-size:13px;'>🔗 View in Sentinel</a>"
+                    if sup_main:  links_html += f"<a href='{sup_main}' target='_blank' style='font-size:13px;margin-right:16px;color:#00897b;'><u><b>Supplier Website</b></u></a>"
+                    if sup_lnk:  links_html += f"<a href='{sup_lnk}'  target='_blank' style='font-size:13px;margin-right:16px;color:#00897b;'>🔗 View on supplier site</a>"
+                    if sent_lnk: links_html += f"<a href='{sent_lnk}' target='_blank' style='font-size:13px;color:#00897b;'>🔗 View in Sentinel</a>"
 
                     st.markdown(f"""
 <div style='background:#f8f9fa;border-left:4px solid #4A90D9;border-radius:0 8px 8px 0;padding:16px 20px;margin:4px 0 8px 0;'>
