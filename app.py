@@ -337,7 +337,7 @@ def badge_style(name: str) -> str:
 # ── DB helpers ─────────────────────────────────────────────────────────────────
 def save_entry(vhc_id, property_name, question, answer, source, added_by,
                supplier_name="", unit_label="", supplier_url="", sentinel_url="",
-               knowledge_type="unit", bedrooms=None):
+               knowledge_type="unit", bedrooms=None, starter_kit="", coffee_machine_type=""):
     supabase.table("knowledge_base").insert({
         "vhc_id":            vhc_id or "",
         "unit_label":        unit_label or "",
@@ -352,6 +352,8 @@ def save_entry(vhc_id, property_name, question, answer, source, added_by,
         "sentinel_url":      sentinel_url or "",
         "knowledge_type":    knowledge_type or "unit",
         "bedrooms":          bedrooms,
+        "starter_kit":       starter_kit or "",
+        "coffee_machine_type": coffee_machine_type or "",
         "updated_at":        datetime.utcnow().isoformat()
     }).execute()
 
@@ -950,7 +952,10 @@ with tab_upload:
                         # Extract bedrooms and construct Sentinel URL
                         bedrooms = extract_bedrooms(prop)
                         sent_url = construct_sentinel_url(supplier_id, vhc) if supplier_id and vhc else ""
-                        save_entry(vhc, prop, q, e.get("answer",""), f"File: {filename}", by, supplier, e.get("unit_label",""), "", sent_url, k_type, bedrooms)
+                        # Get starter kit and coffee machine if present in CSV
+                        starter_kit = e.get("starter_kit", "") or e.get("Starter Kit", "")
+                        coffee_machine = e.get("coffee_machine_type", "") or e.get("Coffee Machine Type", "")
+                        save_entry(vhc, prop, q, e.get("answer",""), f"File: {filename}", by, supplier, e.get("unit_label",""), "", sent_url, k_type, bedrooms, starter_kit, coffee_machine)
                         saved += 1
                     except Exception as ex: st.error(f"Error: {ex}")
                 register_file(fhash, filename, supplier, by)
@@ -1005,6 +1010,21 @@ with tab_add:
             else:
                 na_src_detail = ""
             na_by = st.text_input("Your name *", placeholder="e.g.  Maria", key="na_by_unit")
+
+        st.markdown("---")
+        st.markdown("**Property Details** — *optional information about the unit*")
+        c3, c4 = st.columns(2)
+        with c3:
+            na_starter = st.text_area("Starter Kit Contents", 
+                placeholder="e.g.  2 rolls paper towels, 1 trash bag, dish soap, laundry pods...",
+                height=90,
+                key="na_starter_kit",
+                help="List what's included in the unit's starter kit")
+        with c4:
+            na_coffee = st.selectbox("Coffee Machine Type",
+                ["— Not specified —", "Standard", "Keurig", "No Coffee Machine"],
+                key="na_coffee_machine",
+                help="Select the type of coffee maker in this unit")
 
         st.markdown("**Questions & answers** — *optional. Save the property now and add Q&A later if needed.*")
 
@@ -1061,16 +1081,22 @@ with tab_add:
                 if valid_pairs:
                     saved = skipped = 0
                     bedrooms = extract_bedrooms(na_prop)  # Extract from property name
+                    starter_kit = st.session_state.get("na_starter_kit", "").strip()
+                    coffee_machine = st.session_state.get("na_coffee_machine", "")
+                    coffee_machine = "" if coffee_machine == "— Not specified —" else coffee_machine
                     for p in valid_pairs:
                         if is_duplicate(na_prop, p["q"], na_vhc): skipped += 1; continue
-                        save_entry(na_vhc, na_prop, p["q"], p["a"], final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url, "unit", bedrooms)
+                        save_entry(na_vhc, na_prop, p["q"], p["a"], final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url, "unit", bedrooms, starter_kit, coffee_machine)
                         saved += 1
                     msg = f"✅  Saved {saved} Q&A pair{'s' if saved!=1 else ''} for **{na_prop}**!"
                     if skipped: msg += f" ({skipped} duplicate{'s' if skipped>1 else ''} skipped)"
                     st.success(msg)
                 else:
                     bedrooms = extract_bedrooms(na_prop)  # Extract from property name
-                    save_entry(na_vhc, na_prop, "", "", final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url, "unit", bedrooms)
+                    starter_kit = st.session_state.get("na_starter_kit", "").strip()
+                    coffee_machine = st.session_state.get("na_coffee_machine", "")
+                    coffee_machine = "" if coffee_machine == "— Not specified —" else coffee_machine
+                    save_entry(na_vhc, na_prop, "", "", final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url, "unit", bedrooms, starter_kit, coffee_machine)
                     st.success(f"✅  Property **{na_prop}** registered!")
                 for pair in st.session_state.get("qa_pairs", []):
                     pid = pair["id"]
@@ -1539,7 +1565,10 @@ with tab_view:
 <div><b>Source:</b> {row.get('source') or '—'}</div>
 <div><b>Added by:</b> {row.get('added_by') or '—'}</div>
 <div><b>Date:</b> {(row.get('created_at') or '')[:10] or '—'}</div>
+<div><b>Coffee Machine:</b> {row.get('coffee_machine_type') or '—'}</div>
+<div><b>Bedrooms:</b> {row.get('bedrooms') or '—'}</div>
 </div>
+{('<div style="font-size:13px;margin-bottom:10px;background:#fff;padding:10px;border-radius:4px;border:1px solid #e0e0e0;"><b>Starter Kit:</b><br>'+row.get('starter_kit')+'</div>') if row.get('starter_kit') else ''}
 {'<div style="font-size:13px;margin-bottom:6px;"><b>Question:</b> '+q+'</div>' if q else ''}
 {'<div style="font-size:13px;margin-bottom:10px;"><b>Answer:</b> '+ans+'</div>' if ans else ''}
 {'<div style="margin-top:8px;padding-top:8px;border-top:0.5px solid #ddd;">'+links_html+'</div>' if links_html else ''}
@@ -1573,6 +1602,26 @@ with tab_view:
                     else:
                         e_src_detail = ""
                     e_by = st.text_input("Updated by", value=row.get("added_by",""), key=f"e_by_{eid}")
+                    
+                st.markdown("---")
+                st.markdown("**Property Details**")
+                ed3, ed4 = st.columns(2)
+                with ed3:
+                    e_starter = st.text_area("Starter Kit Contents",
+                        value=row.get("starter_kit","") or "",
+                        placeholder="e.g.  2 rolls paper towels, 1 trash bag, dish soap...",
+                        height=90,
+                        key=f"e_starter_{eid}",
+                        help="List what's included in the starter kit")
+                with ed4:
+                    coffee_opts = ["— Not specified —", "Standard", "Keurig", "No Coffee Machine"]
+                    current_coffee = row.get("coffee_machine_type","") or ""
+                    coffee_idx = coffee_opts.index(current_coffee) if current_coffee in coffee_opts else 0
+                    e_coffee = st.selectbox("Coffee Machine Type",
+                        coffee_opts,
+                        index=coffee_idx,
+                        key=f"e_coffee_{eid}",
+                        help="Type of coffee maker in this unit")
 
                 st.markdown("---")
                 st.markdown("**Question & Answer**")
@@ -1631,6 +1680,9 @@ with tab_view:
                         ep0id = ep0["id"]
                         e_q   = st.session_state.get(f"eqa_q_{ep0id}_{eid}", "")
                         e_ans = st.session_state.get(f"eqa_a_{ep0id}_{eid}", "")
+                        e_starter = st.session_state.get(f"e_starter_{eid}", "").strip()
+                        e_coffee = st.session_state.get(f"e_coffee_{eid}", "")
+                        e_coffee = "" if e_coffee == "— Not specified —" else e_coffee
                         update_entry(eid, {
                             "supplier_name": e_sup if e_sup not in ["— Select —",""] else "",
                             "vhc_id":        e_vhc,     "unit_label":   e_unit,
@@ -1638,6 +1690,7 @@ with tab_view:
                             "answer":        e_ans,     "source":       final_src,
                             "added_by":      e_by,      "supplier_url": e_sup_url,
                             "sentinel_url":  e_sent_url, "bedrooms":     extract_bedrooms(e_prop),
+                            "starter_kit":   e_starter,  "coffee_machine_type": e_coffee,
                         })
                         # Save any additional pairs as new entries
                         for ep in st.session_state[epairs_key][1:]:
@@ -1647,7 +1700,7 @@ with tab_view:
                             if extra_q and extra_a:
                                 save_entry(e_vhc, e_prop, extra_q, extra_a, final_src, e_by,
                                            e_sup if e_sup not in ["— Select —",""] else "",
-                                           e_unit, e_sup_url, e_sent_url, "unit", extract_bedrooms(e_prop))
+                                           e_unit, e_sup_url, e_sent_url, "unit", extract_bedrooms(e_prop), e_starter, e_coffee)
                         # Clean up edit session state
                         for ep in st.session_state.get(epairs_key, []):
                             epid = ep["id"]
