@@ -532,21 +532,29 @@ def search_kb(query: str) -> str:
 
     # Step 1: try to find an answer
     if candidates:
-        prompt = f"""You are an assistant for a vacation rental company called VacayHome.
+        prompt = f"""You are an intelligent assistant for a vacation rental company called VacayHome.
 A team member asked: "{query}"
 
 Below are relevant knowledge base entries:
 {json.dumps(candidates, indent=2, default=str)[:9000]}
 
 Instructions:
-- Search for entries that answer the question.
+- Search for entries that answer the question directly OR contain related information.
 - Supplier-level entries (knowledge_type=supplier) apply to ALL units from that supplier.
 - Unit-level entries (knowledge_type=unit) apply to one specific property.
-- If you find a clear answer, respond with it. Include property name, supplier, and any links.
-  Also include this footer on a new line:
+
+INTELLIGENT SYNTHESIS:
+- If multiple units from the same supplier have the same answer, synthesize: "All [Supplier] units [answer]" or "None of the [Supplier] units [answer]"
+- Example: Query "Are any AlpenGlo units pet friendly?" + Data shows all AlpenGlo units say "No pets" → Answer: "None of the AlpenGlo units are pet friendly. All AlpenGlo properties prohibit pets."
+- If you find patterns across multiple units, summarize them intelligently.
+- If you find a clear direct answer, provide it with property name, supplier, and links.
+
+RESPONSE FORMAT:
+- If you can answer (directly or by synthesis), provide a clear natural language response.
+- Include this footer on a new line:
   META: {{"supplier":"...","added_by":"...","source":"...","date":"...","supplier_url":"...","sentinel_url":"..."}}
-- If nothing in the list answers this question, respond exactly: NO_ANSWER
-- Never invent information."""
+- ONLY respond "NO_ANSWER" if the entries contain NO information related to the query at all.
+- Never invent information not in the entries."""
         result = ask_ai(prompt)
         if "NO_ANSWER" not in result and "NOT_FOUND" not in result:
             return result
@@ -824,6 +832,44 @@ with tab_upload:
             horizontal=False,
             key=f"up_type_{st.session_state['up_form_key']}"
         )
+        
+        # Manual entry option for Supplier Q&A
+        if "🏢" in up_type:
+            st.markdown("---")
+            manual_entry = st.checkbox("✍️  Type Q&A manually (no file needed)", 
+                                      key=f"manual_entry_{st.session_state['up_form_key']}")
+            if manual_entry:
+                st.markdown("""
+<div style='background:#f5f5f5;border-left:4px solid #00897b;border-radius:0 4px 4px 0;
+     padding:12px 16px;margin-bottom:16px;font-size:13px;'>
+<b>Manual Entry Mode</b> — Type your question and answer below. It will apply to ALL units from this supplier.
+</div>
+""", unsafe_allow_html=True)
+                manual_q = st.text_area("Question *", 
+                    placeholder="e.g.  Are pets allowed?",
+                    key=f"manual_q_{st.session_state['up_form_key']}")
+                manual_a = st.text_area("Answer *",
+                    placeholder="e.g.  No pets allowed in any units.",
+                    key=f"manual_a_{st.session_state['up_form_key']}")
+                
+                if st.button("✅  Save Supplier Q&A", type="primary"):
+                    if manual_q.strip() and manual_a.strip() and up_sup != "— Select —" and up_by.strip():
+                        ensure_supplier(up_sup)
+                        try:
+                            save_entry("", up_sup, manual_q.strip(), manual_a.strip(), 
+                                     "Manual entry", up_by.strip(), up_sup, "", "", "", "supplier")
+                            st.success(f"✅  Saved supplier Q&A for **{up_sup}**!")
+                            st.session_state["up_form_key"] = st.session_state.get("up_form_key", 0) + 1
+                            st.balloons()
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error saving: {e}")
+                    else:
+                        st.error("Please fill in all required fields (Supplier, Question, Answer, Your name)")
+                st.markdown("---")
+                st.caption("Or upload a file instead (uncheck the manual entry box above)")
+                st.stop()  # Don't show file uploader if manual entry is selected
+        
         up_file = st.file_uploader("Choose a file", type=["csv","xlsx","xls","txt","pdf","docx","md"],
                                    key=f"up_file_{st.session_state['up_form_key']}")
         up_by   = st.text_input("Your name *", placeholder="e.g. Maria",
@@ -1392,7 +1438,7 @@ with tab_view:
     sup_names = get_supplier_names()
     f1,f2,f3,f4,f5 = st.columns([1.5, 1.5, 1.5, 1.5, 1.2])
     with f1: f_sup  = st.selectbox("Filter by supplier", ["All"] + sup_names)
-    with f2: f_cat  = st.selectbox("Filter by category", CAT_OPTS)
+    with f2: f_cat  = st.selectbox("Filter by amenity", CAT_OPTS)
     with f3: f_type = st.selectbox("Filter by type", ["All","🏠 Unit","🏢 Supplier"])
     with f4: f_bed  = st.selectbox("Filter by bedrooms", ["All","1BR","2BR","3BR","4BR","5BR","6BR+"])
     with f5: f_prop = st.text_input("Search", placeholder="Property name...")
@@ -1561,7 +1607,7 @@ with tab_view:
 <div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:13px;margin-bottom:10px;'>
 <div><b>Supplier:</b> {row.get('supplier_name') or '—'}</div>
 <div><b>Unit Label:</b> {row.get('unit_label') or '—'}</div>
-<div><b>Category:</b> {cat}</div>
+<div><b>Amenity:</b> {cat}</div>
 <div><b>Source:</b> {row.get('source') or '—'}</div>
 <div><b>Added by:</b> {row.get('added_by') or '—'}</div>
 <div><b>Date:</b> {(row.get('created_at') or '')[:10] or '—'}</div>
