@@ -3,7 +3,7 @@ from groq import Groq
 from supabase import create_client
 import requests
 from bs4 import BeautifulSoup
-import json, hashlib, io
+import json, hashlib, io, re
 from datetime import datetime
 import pandas as pd
 
