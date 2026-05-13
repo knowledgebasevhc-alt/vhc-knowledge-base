@@ -187,9 +187,9 @@ h3 { font-size: 18px !important; }
     border-radius: 4px !important;
 }
 
-/* Markdown within cards */
+/* Tight row spacing - like Excel/Google Sheets */
 .element-container {
-    margin-bottom: 1rem;
+    margin-bottom: 2px !important;
 }
 
 /* Forms */
@@ -202,7 +202,7 @@ h3 { font-size: 18px !important; }
 
 /* Spacing improvements */
 .stMarkdown {
-    margin-bottom: 0.5rem;
+    margin-bottom: 1px !important;
 }
 
 /* Number input */
@@ -337,11 +337,14 @@ def detect_address_in_unit_label(unit_label: str) -> str:
     
     unit_label = unit_label.strip()
     
-    # Pattern: looks for format like "123 Main St, Denver, CO" or "104 8th Ave, Ouray, CO"
-    # Must have: number, street name, comma, city, comma, state (2 letters)
-    pattern = r'^\d+\s+[A-Za-z\s]+(?:St|Ave|Rd|Blvd|Ln|Dr|Court|Ct|Drive|Street|Avenue|Road|Boulevard|Lane),\s+[A-Za-z\s]+,\s+[A-Z]{2}$'
+    # Pattern: "123 Main St, Denver, CO" or "104 8th Ave, Ouray, co"
+    # - Starts with a number (street number)
+    # - Followed by any word characters (handles "5th", "1st", etc.)
+    # - Has two commas: one before city, one before state
+    # - Ends with exactly 2 letters (state abbreviation, upper or lowercase)
+    pattern = r'^\d+[\w\s]+,\s*[\w\s]+,\s*[A-Za-z]{2}$'
     
-    if re.match(pattern, unit_label):
+    if re.match(pattern, unit_label.strip(), re.IGNORECASE):
         return unit_label
     
     return ""
@@ -1745,7 +1748,7 @@ with tab_view:
                     else:   sel.discard(eid)
                 with r1:
                     if sup:
-                        short_sup = sup[:18]+"…" if len(sup)>18 else sup
+                        short_sup = sup[:28]+"…" if len(sup)>28 else sup
                         st.markdown(f"<span style='display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500;{badge_style(sup)}'>{short_sup}</span>", unsafe_allow_html=True)
                     else:
                         st.markdown("<span style='color:#ccc;font-size:11px;'>—</span>", unsafe_allow_html=True)
