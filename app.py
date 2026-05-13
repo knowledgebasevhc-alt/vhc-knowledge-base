@@ -606,6 +606,132 @@ def detect_supplier_metadata_file(text: str) -> dict:
     
     return result
 
+def extract_qa_from_email_pdf(text: str) -> dict:
+    """
+    Extract Q&A from PDF email threads (supplier responses).
+    Intelligently handles email formatting, thread chains, and varied response styles.
+    Returns: {
+        "success": bool,
+        "property_identifier": str (unit/address/name),
+        "supplier_name": str,
+        "question": str,
+        "answer": str,
+        "question_category": str,
+        "raw_email_body": str
+    }
+    """
+    result = {
+        "success": False,
+        "property_identifier": "",
+        "supplier_name": "",
+        "question": "",
+        "answer": "",
+        "question_category": "",
+        "raw_email_body": text
+    }
+    
+    try:
+        # Extract supplier name from "From:" line
+        from_match = re.search(r'From:\s*([^\n<]+?)(?:\s*<|$)', text)
+        if from_match:
+            supplier = from_match.group(1).strip()
+            result["supplier_name"] = supplier
+        
+        # Extract property identifier from subject line
+        subject_match = re.search(r'Subject:\s*([^\n]+)', text, re.IGNORECASE)
+        if subject_match:
+            subject = subject_match.group(1).strip()
+            result["property_identifier"] = subject
+            
+            # Extract question category from subject
+            subject_lower = subject.lower()
+            if "pool" in subject_lower:
+                result["question_category"] = "Pool"
+            elif "parking" in subject_lower:
+                result["question_category"] = "Parking"
+            elif "pet" in subject_lower:
+                result["question_category"] = "Pets"
+            elif "golf cart" in subject_lower:
+                result["question_category"] = "Golf Cart"
+            elif "hours" in subject_lower:
+                result["question_category"] = "Hours of Operation"
+            elif "access" in subject_lower:
+                result["question_category"] = "Access"
+            elif "garage" in subject_lower:
+                result["question_category"] = "Garage"
+            elif "ocean" in subject_lower or "view" in subject_lower:
+                result["question_category"] = "View/Ocean"
+        
+        # Split email into main reply and quoted text
+        lines = text.split('\n')
+        
+        # Find the first supplier response (not a forwarded message or quoted text)
+        response_start = -1
+        question_text = ""
+        answer_text = ""
+        
+        # Look for the latest supplier response (appears before quoted content)
+        for i, line in enumerate(lines):
+            # Skip headers
+            if i < 20:  # Most headers are in first 20 lines
+                continue
+            
+            # Stop at quoted text markers
+            if "On " in line and "wrote:" in line:
+                response_start = i
+                break
+            if "--------- Forwarded message" in line:
+                response_start = i
+                break
+        
+        # Extract response (everything before the quoted section)
+        if response_start > 0:
+            response_block = '\n'.join(lines[:response_start])
+        else:
+            response_block = text
+        
+        # Clean the response: remove email signatures and headers
+        response_block = re.sub(r'From:.*?To:.*?\n', '', response_block, flags=re.DOTALL)
+        response_block = re.sub(r'Cc:.*?\n', '', response_block)
+        response_block = re.sub(r'Subject:.*?\n', '', response_block)
+        response_block = re.sub(r'Date:.*?\n', '', response_block)
+        response_block = re.sub(r'--\s*\n.*?(Reservations|Blue Swell|Quarterdeck|Make|Poole).*', '', 
+                               response_block, flags=re.DOTALL)
+        
+        # Extract answer: first meaningful paragraph(s) in the response
+        paragraphs = [p.strip() for p in response_block.split('\n\n') if p.strip()]
+        answer_text = '\n'.join(paragraphs[:3]) if paragraphs else ""
+        answer_text = answer_text.strip()
+        
+        # Extract question from the "wrote:" section
+        wrote_section = text[response_start:] if response_start > 0 else ""
+        question_match = re.search(
+            r'(?:Hi team,|Hi Team,|Good afternoon team,|Hello,)(.*?)(?:Regards,|Thanks,|From:|$)',
+            wrote_section,
+            re.DOTALL
+        )
+        
+        if question_match:
+            question_text = question_match.group(1).strip()
+            # Remove "Raju" signature if present
+            question_text = re.sub(r'\n\s*Raju\s*$', '', question_text)
+            # Get first sentence/question
+            sentences = re.split(r'(?<=[.!?])\s+', question_text)
+            question_text = sentences[0] if sentences else question_text
+        
+        result["question"] = question_text.strip()
+        result["answer"] = answer_text.strip()
+        
+        # Success if we have at least question and answer
+        if result["question"] and result["answer"]:
+            result["success"] = True
+        
+        return result
+        
+    except Exception as e:
+        result["error"] = str(e)
+        return result
+
 def extract_entries_from_chunk(chunk: str) -> list:
     prompt = f"""You are analyzing vacation rental property data.
 Extract every useful piece of property information and return a JSON array.
@@ -1181,6 +1307,77 @@ with tab_upload:
                                         st.error(f"Error: {e}")
                             
                             st.stop()  # Don't process as property Q&A if supplier metadata detected
+                        
+                        # ══ NEW: Detect Q&A from email PDF threads ══
+                        is_email_pdf = up_file.name.lower().endswith(".pdf") and ("From:" in text and "To:" in text)
+                        
+                        if is_email_pdf:
+                            with st.spinner("🤖  Extracting Q&A from email..."):
+                                qa_result = extract_qa_from_email_pdf(text)
+                            
+                            if qa_result["success"]:
+                                st.success("✅  Q&A extracted from email!")
+                                
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.write("**Supplier:**")
+                                    st.code(qa_result["supplier_name"], language="text")
+                                    st.write("**Property/Unit:**")
+                                    st.code(qa_result["property_identifier"], language="text")
+                                
+                                with col2:
+                                    st.write("**Category:**")
+                                    st.code(qa_result["question_category"] or "Other", language="text")
+                                
+                                st.write("**Question:**")
+                                st.info(qa_result["question"])
+                                st.write("**Answer:**")
+                                st.info(qa_result["answer"])
+                                
+                                # Allow user to save or refine
+                                st.markdown("---")
+                                st.write("**Confirm & Save:**")
+                                
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    prop_name = st.text_input("Property Name *", value=qa_result["property_identifier"])
+                                with col2:
+                                    category = st.selectbox("Question Category", 
+                                                           ["Pool", "Parking", "Pets", "Golf Cart", "Hours of Operation", 
+                                                            "Access", "Garage", "View/Ocean", "Other"],
+                                                           index=["Pool", "Parking", "Pets", "Golf Cart", "Hours of Operation", 
+                                                                  "Access", "Garage", "View/Ocean", "Other"].index(qa_result["question_category"] or "Other"))
+                                
+                                question = st.text_area("Question", value=qa_result["question"], height=80)
+                                answer = st.text_area("Answer", value=qa_result["answer"], height=100)
+                                
+                                if st.button("💾  Save Q&A", type="primary"):
+                                    if prop_name and question and answer:
+                                        try:
+                                            ensure_supplier(up_sup)
+                                            save_entry("", up_sup, question, answer, category, up_by.strip(), up_sup, 
+                                                     prop_name, "", "", "property")
+                                            st.success(f"✅  Saved Q&A for **{prop_name}** from **{up_sup}**!")
+                                            st.balloons()
+                                            
+                                            # Record file as processed
+                                            record_hash = file_hash(raw)
+                                            supabase.table("uploaded_files").insert({
+                                                "file_hash": record_hash,
+                                                "supplier_name": up_sup,
+                                                "uploaded_by": up_by.strip(),
+                                                "uploaded_at": datetime.now().isoformat()
+                                            }).execute()
+                                            st.session_state["up_form_key"] = st.session_state.get("up_form_key", 0) + 1
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Error saving: {e}")
+                                    else:
+                                        st.error("Please fill in Property Name, Question, and Answer")
+                            else:
+                                st.warning("⚠️  Could not extract Q&A from this email PDF. Try manual entry instead.")
+                            
+                            st.stop()
                         
                         # ══ Original logic: Detect if this is a property index CSV ══
                         is_property_csv = up_file.name.lower().endswith((".csv",".xlsx",".xls")) and                                           any(col in text[:500] for col in ["VHC ID","Property VHC ID","vhc_id","Property Name"])
