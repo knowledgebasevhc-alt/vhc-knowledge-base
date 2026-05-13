@@ -555,6 +555,57 @@ def read_bytes(raw: bytes, fname: str) -> str:
         try: return raw.decode("utf-8", errors="ignore")
         except: return "ERROR: Unreadable file."
 
+def extract_phone_numbers(text: str) -> list:
+    """Extract phone numbers from text using regex"""
+    patterns = [
+        r'\+?1?\s*\(?(\d{3})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})',  # US format
+        r'\(\d{3}\)\s*\d{3}-\d{4}',  # (XXX) XXX-XXXX
+        r'\d{3}-\d{3}-\d{4}',  # XXX-XXX-XXXX
+    ]
+    phones = []
+    for pattern in patterns:
+        matches = re.findall(pattern, text)
+        for match in matches:
+            if isinstance(match, tuple):
+                phone = f"{match[0]}-{match[1]}-{match[2]}"
+            else:
+                phone = match
+            if phone and phone not in phones:
+                phones.append(phone)
+    return phones
+
+def extract_urls(text: str) -> list:
+    """Extract URLs from text using regex"""
+    pattern = r'https?://[^\s\n\)>]+'
+    urls = re.findall(pattern, text)
+    return list(set(urls))  # Remove duplicates
+
+def detect_supplier_metadata_file(text: str) -> dict:
+    """
+    Detect if file contains supplier-level metadata (phone, website, etc.)
+    Returns dict with detected metadata type and extracted data
+    """
+    phones = extract_phone_numbers(text)
+    urls = extract_urls(text)
+    
+    result = {
+        "is_supplier_metadata": False,
+        "phones": phones,
+        "urls": urls,
+        "type": None  # "phone", "website", "both", or None
+    }
+    
+    if phones or urls:
+        result["is_supplier_metadata"] = True
+        if phones and not urls:
+            result["type"] = "phone"
+        elif urls and not phones:
+            result["type"] = "website"
+        else:
+            result["type"] = "both"
+    
+    return result
+
 def extract_entries_from_chunk(chunk: str) -> list:
     prompt = f"""You are analyzing vacation rental property data.
 Extract every useful piece of property information and return a JSON array.
@@ -1069,7 +1120,69 @@ with tab_upload:
                     if text.startswith("ERROR"):
                         st.error(text)
                     else:
-                        # Detect if this is a property index CSV (has VHC ID column)
+                        # ══ NEW: Detect supplier metadata files (phone, website) ══
+                        metadata = detect_supplier_metadata_file(text)
+                        
+                        if metadata["is_supplier_metadata"]:
+                            # Handle supplier metadata (phone/website) upload
+                            st.info(f"📞 Detected supplier metadata: {metadata['type']}")
+                            
+                            phone = metadata["phones"][0] if metadata["phones"] else None
+                            url = metadata["urls"][0] if metadata["urls"] else None
+                            
+                            if phone:
+                                st.write(f"**Phone:** {phone}")
+                                # Create supplier Q&A for phone
+                                if st.button("✅  Save as Supplier Q&A (Phone Contact)", type="primary"):
+                                    ensure_supplier(up_sup)
+                                    try:
+                                        save_entry("", up_sup, "What is the best phone number to contact this supplier?", phone,
+                                                 "Phone contact info", up_by.strip(), up_sup, "", "", "", "supplier")
+                                        st.success(f"✅  Saved phone number for all **{up_sup}** units!")
+                                        st.balloons()
+                                        # Record file as processed
+                                        record_hash = file_hash(raw)
+                                        supabase.table("uploaded_files").insert({
+                                            "file_hash": record_hash,
+                                            "supplier_name": up_sup,
+                                            "uploaded_by": up_by.strip(),
+                                            "uploaded_at": datetime.now().isoformat()
+                                        }).execute()
+                                        st.session_state["up_form_key"] = st.session_state.get("up_form_key", 0) + 1
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Error: {e}")
+                            
+                            if url:
+                                st.write(f"**Website:** {url}")
+                                # Update supplier URL in database
+                                if st.button("✅  Save as Supplier Website", type="primary"):
+                                    try:
+                                        # Update supplier with URL
+                                        result = supabase.table("suppliers").select("id").eq("name", up_sup).execute()
+                                        if result.data:
+                                            sup_id = result.data[0]["id"]
+                                            supabase.table("suppliers").update({"supplier_url": url}).eq("id", sup_id).execute()
+                                            st.success(f"✅  Updated website for **{up_sup}**!")
+                                            st.balloons()
+                                            # Record file as processed
+                                            record_hash = file_hash(raw)
+                                            supabase.table("uploaded_files").insert({
+                                                "file_hash": record_hash,
+                                                "supplier_name": up_sup,
+                                                "uploaded_by": up_by.strip(),
+                                                "uploaded_at": datetime.now().isoformat()
+                                            }).execute()
+                                            st.session_state["up_form_key"] = st.session_state.get("up_form_key", 0) + 1
+                                            st.rerun()
+                                        else:
+                                            st.error(f"Supplier {up_sup} not found in database")
+                                    except Exception as e:
+                                        st.error(f"Error: {e}")
+                            
+                            st.stop()  # Don't process as property Q&A if supplier metadata detected
+                        
+                        # ══ Original logic: Detect if this is a property index CSV ══
                         is_property_csv = up_file.name.lower().endswith((".csv",".xlsx",".xls")) and                                           any(col in text[:500] for col in ["VHC ID","Property VHC ID","vhc_id","Property Name"])
 
                         if is_property_csv:
@@ -2467,90 +2580,6 @@ def register_file(fhash, fname, supplier, uploaded_by):
             "supplier_name":supplier,"uploaded_by":uploaded_by
         }).execute()
     except: pass
-
-def read_bytes(raw: bytes, fname: str) -> str:
-    n = fname.lower()
-    if n.endswith(".csv"):
-        return pd.read_csv(io.BytesIO(raw)).to_string(index=False)
-    elif n.endswith((".xlsx",".xls")):
-        try:
-            df = pd.read_excel(io.BytesIO(raw), sheet_name=None)
-            parts = []
-            for sheet, data in df.items():
-                parts.append(f"--- Sheet: {sheet} ---")
-                parts.append(data.to_string(index=False))
-            return "\n".join(parts)
-        except Exception as e: return f"ERROR reading Excel: {e}"
-    elif n.endswith((".txt",".md")):
-        return raw.decode("utf-8", errors="ignore")
-    elif n.endswith(".pdf"):
-        try:
-            import pypdf
-            return "\n".join(p.extract_text() or "" for p in pypdf.PdfReader(io.BytesIO(raw)).pages)
-        except Exception as e: return f"ERROR: {e}"
-    elif n.endswith(".docx"):
-        try:
-            import docx
-            return "\n".join(p.text for p in docx.Document(io.BytesIO(raw)).paragraphs if p.text.strip())
-        except Exception as e: return f"ERROR: {e}"
-    else:
-        try: return raw.decode("utf-8", errors="ignore")
-        except: return "ERROR: Unreadable file."
-
-def extract_entries_from_chunk(chunk: str) -> list:
-    prompt = f"""You are analyzing vacation rental property data.
-Extract every useful piece of property information and return a JSON array.
-Each item must have:
-- "property_name": property name or address (required)
-- "vhc_id": VHC or property ID if present, else ""
-- "unit_label": unit number/label if present, else ""
-- "question": a clear question this info answers (required)
-- "answer": the answer (required)
-Only include entries where BOTH question and answer are clearly present.
-Do not invent or guess. Return ONLY a raw JSON array, no backticks, no explanation.
-Text:
-{chunk}"""
-    try:
-        r = ask_ai(prompt).strip().replace("```json","").replace("```","").strip()
-        s, e = r.find("["), r.rfind("]")+1
-        return json.loads(r[s:e]) if s>=0 and e>0 else []
-    except:
-        return []
-
-def extract_entries(content: str) -> list:
-    CHUNK_SIZE  = 6000
-    OVERLAP     = 200
-    all_entries = []
-    seen_keys   = set()
-
-    # Split into overlapping chunks
-    chunks = []
-    start  = 0
-    while start < len(content):
-        end = start + CHUNK_SIZE
-        chunks.append(content[start:end])
-        start = end - OVERLAP
-        if start >= len(content):
-            break
-
-    total = len(chunks)
-    prog  = st.progress(0, text=f"Processing chunk 1 of {total}...")
-
-    for i, chunk in enumerate(chunks):
-        prog.progress((i+1)/total, text=f"Processing chunk {i+1} of {total}...")
-        entries = extract_entries_from_chunk(chunk)
-        for e in entries:
-            prop = (e.get("property_name","") or "").strip()
-            q    = (e.get("question","") or "").strip()
-            if not prop or not q:
-                continue
-            key = (prop.lower(), q.lower())
-            if key not in seen_keys:
-                seen_keys.add(key)
-                all_entries.append(e)
-
-    prog.empty()
-    return all_entries
 
 def scrape(url: str, query: str) -> str:
     try:
