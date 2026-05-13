@@ -317,6 +317,15 @@ def extract_bedrooms(prop_name: str) -> int:
         return int(match.group(1))
     return None
 
+def create_google_maps_link(address: str) -> str:
+    """Create clickable Google Maps link from address"""
+    if not address or not address.strip():
+        return ""
+    # URL encode the address
+    import urllib.parse
+    encoded = urllib.parse.quote(address.strip())
+    return f"https://www.google.com/maps/search/{encoded}"
+
 def construct_sentinel_url(supplier_id: int, vhc_id: str) -> str:
     """Build Sentinel URL from supplier ID and VHC ID"""
     if not supplier_id or not vhc_id:
@@ -355,7 +364,7 @@ def badge_style(name: str) -> str:
 # ── DB helpers ─────────────────────────────────────────────────────────────────
 def save_entry(vhc_id, property_name, question, answer, source, added_by,
                supplier_name="", unit_label="", supplier_url="", sentinel_url="",
-               knowledge_type="unit", bedrooms=None, starter_kit="", coffee_machine_type=""):
+               knowledge_type="unit", bedrooms=None, starter_kit="", coffee_machine_type="", address=""):
     supabase.table("knowledge_base").insert({
         "vhc_id":            vhc_id or "",
         "unit_label":        unit_label or "",
@@ -372,6 +381,7 @@ def save_entry(vhc_id, property_name, question, answer, source, added_by,
         "bedrooms":          bedrooms,
         "starter_kit":       starter_kit or "",
         "coffee_machine_type": coffee_machine_type or "",
+        "address":           address or "",
         "updated_at":        datetime.utcnow().isoformat()
     }).execute()
 
@@ -1025,10 +1035,11 @@ with tab_upload:
                         # Extract bedrooms and construct Sentinel URL
                         bedrooms = extract_bedrooms(prop)
                         sent_url = construct_sentinel_url(supplier_id, vhc) if supplier_id and vhc else ""
-                        # Get starter kit and coffee machine if present in CSV
+                        # Get starter kit, coffee machine, and address if present in CSV
                         starter_kit = e.get("starter_kit", "") or e.get("Starter Kit", "")
                         coffee_machine = e.get("coffee_machine_type", "") or e.get("Coffee Machine Type", "")
-                        save_entry(vhc, prop, q, e.get("answer",""), f"File: {filename}", by, supplier, e.get("unit_label",""), "", sent_url, k_type, bedrooms, starter_kit, coffee_machine)
+                        address = e.get("address", "") or e.get("Address", "")
+                        save_entry(vhc, prop, q, e.get("answer",""), f"File: {filename}", by, supplier, e.get("unit_label",""), "", sent_url, k_type, bedrooms, starter_kit, coffee_machine, address)
                         saved += 1
                     except Exception as ex: st.error(f"Error: {ex}")
                 register_file(fhash, filename, supplier, by)
@@ -1099,6 +1110,11 @@ with tab_add:
                 key="na_coffee_machine",
                 help="Select the type of coffee maker in this unit")
 
+        na_address = st.text_input("Property Address",
+            placeholder="e.g.  123 Mountain Road, Aspen, CO 81611",
+            key="na_address",
+            help="Full address of the property (will be clickable Google Maps link)")
+
         st.markdown("**Questions & answers** — *optional. Save the property now and add Q&A later if needed.*")
 
         if "qa_pairs" not in st.session_state:
@@ -1153,23 +1169,25 @@ with tab_add:
                         valid_pairs.append({"q": q_val, "a": a_val})
                 if valid_pairs:
                     saved = skipped = 0
-                    bedrooms = extract_bedrooms(na_prop)  # Extract from property name
+                    bedrooms = extract_bedrooms(na_prop)
                     starter_kit = st.session_state.get("na_starter_kit", "").strip()
                     coffee_machine = st.session_state.get("na_coffee_machine", "")
                     coffee_machine = "" if coffee_machine == "— Not specified —" else coffee_machine
+                    na_address = st.session_state.get("na_address", "").strip()
                     for p in valid_pairs:
                         if is_duplicate(na_prop, p["q"], na_vhc): skipped += 1; continue
-                        save_entry(na_vhc, na_prop, p["q"], p["a"], final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url, "unit", bedrooms, starter_kit, coffee_machine)
+                        save_entry(na_vhc, na_prop, p["q"], p["a"], final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url, "unit", bedrooms, starter_kit, coffee_machine, na_address)
                         saved += 1
                     msg = f"✅  Saved {saved} Q&A pair{'s' if saved!=1 else ''} for **{na_prop}**!"
                     if skipped: msg += f" ({skipped} duplicate{'s' if skipped>1 else ''} skipped)"
                     st.success(msg)
                 else:
-                    bedrooms = extract_bedrooms(na_prop)  # Extract from property name
+                    bedrooms = extract_bedrooms(na_prop)
                     starter_kit = st.session_state.get("na_starter_kit", "").strip()
                     coffee_machine = st.session_state.get("na_coffee_machine", "")
                     coffee_machine = "" if coffee_machine == "— Not specified —" else coffee_machine
-                    save_entry(na_vhc, na_prop, "", "", final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url, "unit", bedrooms, starter_kit, coffee_machine)
+                    na_address = st.session_state.get("na_address", "").strip()
+                    save_entry(na_vhc, na_prop, "", "", final_src, na_by, na_sup, na_unit, na_sup_url, na_sent_url, "unit", bedrooms, starter_kit, coffee_machine, na_address)
                     st.success(f"✅  Property **{na_prop}** registered!")
                 for pair in st.session_state.get("qa_pairs", []):
                     pid = pair["id"]
@@ -1393,13 +1411,32 @@ with tab_suppliers:
                     placeholder="e.g.  Timing: 3 days before. Method: Email. Lockbox code sent via email.",
                     height=80)
                 
+                st.markdown("**Special Requests**")
+                can_special = st.selectbox(
+                    "Can this supplier do something special for guests upon request?",
+                    ["— Not specified —", "Yes", "No"],
+                    index=(1 if s.get('can_do_special_requests') is True else (2 if s.get('can_do_special_requests') is False else 0)),
+                    key=f"can_special_{s['id']}"
+                )
+                special_process = ""
+                if can_special == "Yes":
+                    special_process = st.text_area(
+                        "Process for special requests",
+                        value=s.get('special_request_process') or "",
+                        placeholder="e.g.  Contact property manager 2 weeks in advance. Common requests: massage therapist, chef preparation, photography session.",
+                        height=80,
+                        key=f"special_process_{s['id']}"
+                    )
+                
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     if st.form_submit_button("💾  Save changes", type="primary"):
                         sup_data = {
                             "name": new_name.strip(),
                             "website": new_web.strip(),
-                            "checkin_instructions": new_ci.strip()
+                            "checkin_instructions": new_ci.strip(),
+                            "can_do_special_requests": None if can_special == "— Not specified —" else (can_special == "Yes"),
+                            "special_request_process": special_process.strip() if can_special == "Yes" else None
                         }
                         if new_id > 0:
                             sup_data["supplier_id"] = new_id
@@ -1629,24 +1666,29 @@ with tab_view:
                     if sup_lnk:  links_html += f"<a href='{sup_lnk}'  target='_blank' style='font-size:13px;margin-right:16px;color:#5a9e8f;'>🔗 View on supplier site</a>"
                     if sent_lnk: links_html += f"<a href='{sent_lnk}' target='_blank' style='font-size:13px;color:#5a9e8f;'>🔗 View in Sentinel</a>"
 
+                    # Format address for Google Maps if available
+                    addr = (row.get('address') or '').strip()
+                    addr_html = f"<a href='{create_google_maps_link(addr)}' target='_blank' style='color:#5a9e8f;text-decoration:underline;font-size:13px;'>{addr} 📍</a>" if addr else "—"
+                    
                     st.markdown(f"""
-<div style='background:#f8f9fa;border-left:4px solid #1956d2;border-radius:0 8px 8px 0;padding:16px 20px;margin:4px 0 8px 0;'>
-<div style='font-size:16px;font-weight:600;margin-bottom:4px;'>🏠 {row.get('property_name','')}</div>
-<div style='font-size:13px;font-weight:500;color:#5a9e8f;margin-bottom:12px;background:#e8f5e9;padding:6px 10px;border-radius:4px;font-family:monospace;display:inline-block;'>VHC ID: {vhc}</div>
-<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:13px;margin-bottom:10px;margin-top:12px;'>
+<div style='background:#f8f9fa;border-left:4px solid #1956d2;border-radius:0 8px 8px 0;padding:12px 14px;margin:2px 0 4px 0;'>
+<div style='font-size:16px;font-weight:600;margin-bottom:2px;'>🏠 {row.get('property_name','')}</div>
+<div style='font-size:12px;font-weight:500;color:#5a9e8f;margin-bottom:6px;background:#e8f5e9;padding:3px 8px;border-radius:4px;font-family:monospace;display:inline-block;'>VHC ID: {vhc}</div>
+<div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;font-size:12px;margin-bottom:6px;margin-top:6px;line-height:1.4;'>
 <div><b>Supplier:</b> {row.get('supplier_name') or '—'}</div>
-<div><b>Unit Label:</b> {row.get('unit_label') or '—'}</div>
+<div><b>Unit:</b> {row.get('unit_label') or '—'}</div>
 <div><b>Amenity:</b> {cat}</div>
 <div><b>Source:</b> {row.get('source') or '—'}</div>
-<div><b>Added by:</b> {row.get('added_by') or '—'}</div>
+<div><b>By:</b> {row.get('added_by') or '—'}</div>
 <div><b>Date:</b> {(row.get('created_at') or '')[:10] or '—'}</div>
-<div><b>Coffee Machine:</b> {row.get('coffee_machine_type') or '—'}</div>
-<div><b>Bedrooms:</b> {row.get('bedrooms') or '—'}</div>
+<div><b>Coffee:</b> {row.get('coffee_machine_type') or '—'}</div>
+<div><b>Beds:</b> {row.get('bedrooms') or '—'}</div>
 </div>
-{('<div style="font-size:13px;margin-bottom:10px;background:#fff;padding:10px;border-radius:4px;border:1px solid #e0e0e0;"><b>Starter Kit:</b><br>'+row.get('starter_kit')+'</div>') if row.get('starter_kit') else ''}
-{'<div style="font-size:13px;margin-bottom:6px;"><b>Question:</b> '+q+'</div>' if q else ''}
-{'<div style="font-size:13px;margin-bottom:10px;"><b>Answer:</b> '+ans+'</div>' if ans else ''}
-{'<div style="margin-top:8px;padding-top:8px;border-top:0.5px solid #ddd;">'+links_html+'</div>' if links_html else ''}
+<div style='font-size:12px;margin-bottom:4px;'><b>📍 Address:</b> {addr_html}</div>
+{('<div style="font-size:12px;margin-bottom:6px;background:#fff;padding:6px 8px;border-radius:4px;border:1px solid #e0e0e0;"><b>Starter Kit:</b> '+row.get('starter_kit')+'</div>') if row.get('starter_kit') else ''}
+{'<div style="font-size:12px;margin-bottom:4px;"><b>Q:</b> '+q+'</div>' if q else ''}
+{'<div style="font-size:12px;margin-bottom:4px;"><b>A:</b> '+ans+'</div>' if ans else ''}
+{'<div style="margin-top:4px;padding-top:4px;border-top:0.5px solid #ddd;font-size:11px;">'+links_html+'</div>' if links_html else ''}
 </div>
 """, unsafe_allow_html=True)
 
@@ -1697,6 +1739,12 @@ with tab_view:
                         index=coffee_idx,
                         key=f"e_coffee_{eid}",
                         help="Type of coffee maker in this unit")
+
+                e_address = st.text_input("Property Address",
+                    value=row.get("address","") or "",
+                    placeholder="e.g.  123 Mountain Road, Aspen, CO 81611",
+                    key=f"e_address_{eid}",
+                    help="Full address of the property")
 
                 st.markdown("---")
                 st.markdown("**Question & Answer**")
@@ -1758,6 +1806,7 @@ with tab_view:
                         e_starter = st.session_state.get(f"e_starter_{eid}", "").strip()
                         e_coffee = st.session_state.get(f"e_coffee_{eid}", "")
                         e_coffee = "" if e_coffee == "— Not specified —" else e_coffee
+                        e_address = st.session_state.get(f"e_address_{eid}", "").strip()
                         update_entry(eid, {
                             "supplier_name": e_sup if e_sup not in ["— Select —",""] else "",
                             "vhc_id":        e_vhc,     "unit_label":   e_unit,
@@ -1766,6 +1815,7 @@ with tab_view:
                             "added_by":      e_by,      "supplier_url": e_sup_url,
                             "sentinel_url":  e_sent_url, "bedrooms":     extract_bedrooms(e_prop),
                             "starter_kit":   e_starter,  "coffee_machine_type": e_coffee,
+                            "address":       e_address,
                         })
                         # Save any additional pairs as new entries
                         for ep in st.session_state[epairs_key][1:]:
@@ -1775,7 +1825,7 @@ with tab_view:
                             if extra_q and extra_a:
                                 save_entry(e_vhc, e_prop, extra_q, extra_a, final_src, e_by,
                                            e_sup if e_sup not in ["— Select —",""] else "",
-                                           e_unit, e_sup_url, e_sent_url, "unit", extract_bedrooms(e_prop), e_starter, e_coffee)
+                                           e_unit, e_sup_url, e_sent_url, "unit", extract_bedrooms(e_prop), e_starter, e_coffee, e_address)
                         # Clean up edit session state
                         for ep in st.session_state.get(epairs_key, []):
                             epid = ep["id"]
@@ -2189,7 +2239,7 @@ def badge_style(name: str) -> str:
 # ── DB helpers ─────────────────────────────────────────────────────────────────
 def save_entry(vhc_id, property_name, question, answer, source, added_by,
                supplier_name="", unit_label="", supplier_url="", sentinel_url="",
-               knowledge_type="unit", bedrooms=None, starter_kit="", coffee_machine_type=""):
+               knowledge_type="unit", bedrooms=None, starter_kit="", coffee_machine_type="", address=""):
     supabase.table("knowledge_base").insert({
         "vhc_id":            vhc_id or "",
         "unit_label":        unit_label or "",
@@ -2206,6 +2256,7 @@ def save_entry(vhc_id, property_name, question, answer, source, added_by,
         "bedrooms":          bedrooms,
         "starter_kit":       starter_kit or "",
         "coffee_machine_type": coffee_machine_type or "",
+        "address":           address or "",
         "updated_at":        datetime.utcnow().isoformat()
     }).execute()
 
