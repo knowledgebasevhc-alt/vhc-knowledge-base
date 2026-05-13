@@ -719,74 +719,45 @@ st.caption("Your team's single source of truth for property information.")
 st.markdown("---")
 
 # ══ AUTO ADDRESS MIGRATION ════════════════════════════════════════════════════
-# Scan all entries with empty address, detect address in unit_label,
-# geocode with Google Maps, populate full address with zip code.
+# Detect addresses in unit_label, save to address field, geocode for zip codes.
+# Runs once per session. If geocoding fails, still saves the detected address.
 if not st.session_state.get("address_migration_done"):
-    migration_status = st.status("🤖 Auto-populating addresses from unit labels...", expanded=False)
-    
     try:
-        with migration_status:
-            st.write("Step 1: Finding entries with empty addresses...")
-            
-            # Query entries where address is NULL or empty
-            rows_to_fix = supabase.table("knowledge_base") \
-                .select("id,unit_label,address") \
-                .is_("address", "null") \
-                .execute().data or []
-            
-            rows_empty = supabase.table("knowledge_base") \
-                .select("id,unit_label,address") \
-                .eq("address", "") \
-                .execute().data or []
-            
-            all_rows = list({r["id"]: r for r in rows_to_fix + rows_empty}.values())
-            st.write(f"✓ Found {len(all_rows)} entries to process")
-            
-            if len(all_rows) > 0:
-                st.write("Step 2: Detecting addresses in unit labels...")
-                
-                updated_count = 0
-                failed_count = 0
-                
-                progress_bar = st.progress(0)
-                
-                for i, row in enumerate(all_rows):
-                    unit_label = (row.get("unit_label") or "").strip()
-                    detected = detect_address_in_unit_label(unit_label)
-                    
-                    if detected:
-                        geocode_result = geocode_address(detected)
-                        
-                        if geocode_result.get("success"):
-                            complete_addr = geocode_result.get("address", "")
-                            try:
-                                supabase.table("knowledge_base") \
-                                    .update({"address": complete_addr}) \
-                                    .eq("id", row["id"]) \
-                                    .execute()
-                                updated_count += 1
-                            except Exception as db_error:
-                                st.write(f"❌ Failed to update entry {row['id']}: {str(db_error)}")
-                                failed_count += 1
-                        else:
-                            st.write(f"⚠️  Geocoding failed for: {detected}")
-                            failed_count += 1
-                    
-                    progress = (i + 1) / len(all_rows)
-                    progress_bar.progress(progress)
-                
-                progress_bar.empty()
-                st.write(f"Step 3: Complete!")
-                st.success(f"✅ Updated {updated_count} addresses | ⚠️ Failed: {failed_count}")
-            else:
-                st.write("✓ All entries already have addresses!")
-            
-            st.session_state["address_migration_done"] = True
-            
+        # Step 1: Find ALL entries where address is null or empty
+        rows_null  = supabase.table("knowledge_base").select("id,unit_label,address").is_("address", "null").execute().data or []
+        rows_empty = supabase.table("knowledge_base").select("id,unit_label,address").eq("address", "").execute().data or []
+        all_rows   = list({r["id"]: r for r in rows_null + rows_empty}.values())
+
+        updated = 0
+        for row in all_rows:
+            unit_label = (row.get("unit_label") or "").strip()
+            detected = detect_address_in_unit_label(unit_label)
+
+            if detected:
+                # Try geocoding to get complete address with zip code
+                final_address = detected  # Default: use detected address as-is
+                try:
+                    geocode_result = geocode_address(detected)
+                    if geocode_result.get("success"):
+                        final_address = geocode_result.get("address", detected)
+                except Exception:
+                    pass  # Geocoding failed — keep detected address without zip
+
+                # Save the address (with or without zip code)
+                try:
+                    supabase.table("knowledge_base").update({"address": final_address}).eq("id", row["id"]).execute()
+                    updated += 1
+                except Exception:
+                    pass  # DB update failed for this row — skip it
+
+        if updated > 0:
+            st.info(f"📍 Auto-populated {updated} address{'es' if updated != 1 else ''} from unit labels")
+
+        st.session_state["address_migration_done"] = True
+
     except Exception as e:
-        st.error(f"❌ Migration error: {str(e)}")
-        st.write(f"Full error: {type(e).__name__}")
-        st.session_state["address_migration_done"] = False  # Don't set flag on error — try again next load
+        st.warning(f"⚠️ Address auto-population encountered an issue: {e}")
+        st.session_state["address_migration_done"] = False
 
 tab_search, tab_upload, tab_add, tab_suppliers, tab_view = st.tabs([
     "🔍  Search", "📤  Bulk Upload", "➕  Add Entry", "🏢  Suppliers", "📋  View / Edit All"
