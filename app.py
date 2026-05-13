@@ -719,38 +719,74 @@ st.caption("Your team's single source of truth for property information.")
 st.markdown("---")
 
 # ══ AUTO ADDRESS MIGRATION ════════════════════════════════════════════════════
-# Silently scan all entries with empty address, detect address in unit_label,
-# geocode with Google Maps, and update. Runs once per session.
+# Scan all entries with empty address, detect address in unit_label,
+# geocode with Google Maps, populate full address with zip code.
 if not st.session_state.get("address_migration_done"):
-    try:
-        rows_to_fix = supabase.table("knowledge_base") \
-            .select("id,unit_label,address") \
-            .is_("address", "null") \
-            .execute().data or []
-        
-        # Also grab rows where address is empty string (not just null)
-        rows_empty = supabase.table("knowledge_base") \
-            .select("id,unit_label,address") \
-            .eq("address", "") \
-            .execute().data or []
-        
-        all_rows = {r["id"]: r for r in rows_to_fix + rows_empty}.values()
-        
-        for row in all_rows:
-            unit_label = (row.get("unit_label") or "").strip()
-            detected = detect_address_in_unit_label(unit_label)
-            if detected:
-                geocode_result = geocode_address(detected)
-                complete_addr = geocode_result.get("address", "") if geocode_result.get("success") else detected
-                if complete_addr:
-                    supabase.table("knowledge_base") \
-                        .update({"address": complete_addr}) \
-                        .eq("id", row["id"]) \
-                        .execute()
-    except Exception:
-        pass  # Silent fail — never block the app from loading
+    migration_status = st.status("🤖 Auto-populating addresses from unit labels...", expanded=False)
     
-    st.session_state["address_migration_done"] = True
+    try:
+        with migration_status:
+            st.write("Step 1: Finding entries with empty addresses...")
+            
+            # Query entries where address is NULL or empty
+            rows_to_fix = supabase.table("knowledge_base") \
+                .select("id,unit_label,address") \
+                .is_("address", "null") \
+                .execute().data or []
+            
+            rows_empty = supabase.table("knowledge_base") \
+                .select("id,unit_label,address") \
+                .eq("address", "") \
+                .execute().data or []
+            
+            all_rows = list({r["id"]: r for r in rows_to_fix + rows_empty}.values())
+            st.write(f"✓ Found {len(all_rows)} entries to process")
+            
+            if len(all_rows) > 0:
+                st.write("Step 2: Detecting addresses in unit labels...")
+                
+                updated_count = 0
+                failed_count = 0
+                
+                progress_bar = st.progress(0)
+                
+                for i, row in enumerate(all_rows):
+                    unit_label = (row.get("unit_label") or "").strip()
+                    detected = detect_address_in_unit_label(unit_label)
+                    
+                    if detected:
+                        geocode_result = geocode_address(detected)
+                        
+                        if geocode_result.get("success"):
+                            complete_addr = geocode_result.get("address", "")
+                            try:
+                                supabase.table("knowledge_base") \
+                                    .update({"address": complete_addr}) \
+                                    .eq("id", row["id"]) \
+                                    .execute()
+                                updated_count += 1
+                            except Exception as db_error:
+                                st.write(f"❌ Failed to update entry {row['id']}: {str(db_error)}")
+                                failed_count += 1
+                        else:
+                            st.write(f"⚠️  Geocoding failed for: {detected}")
+                            failed_count += 1
+                    
+                    progress = (i + 1) / len(all_rows)
+                    progress_bar.progress(progress)
+                
+                progress_bar.empty()
+                st.write(f"Step 3: Complete!")
+                st.success(f"✅ Updated {updated_count} addresses | ⚠️ Failed: {failed_count}")
+            else:
+                st.write("✓ All entries already have addresses!")
+            
+            st.session_state["address_migration_done"] = True
+            
+    except Exception as e:
+        st.error(f"❌ Migration error: {str(e)}")
+        st.write(f"Full error: {type(e).__name__}")
+        st.session_state["address_migration_done"] = False  # Don't set flag on error — try again next load
 
 tab_search, tab_upload, tab_add, tab_suppliers, tab_view = st.tabs([
     "🔍  Search", "📤  Bulk Upload", "➕  Add Entry", "🏢  Suppliers", "📋  View / Edit All"
@@ -1664,10 +1700,10 @@ with tab_view:
     
     sup_names = get_supplier_names()
     f1,f2,f3,f4,f5 = st.columns([1.5, 1.5, 1.5, 1.5, 1.2])
-    with f1: f_sup  = st.selectbox("Filter by supplier", ["All"] + sup_names)
-    with f2: f_cat  = st.selectbox("Filter by amenity", CAT_OPTS)
-    with f3: f_type = st.selectbox("Filter by type", ["All","🏠 Unit","🏢 Supplier"])
-    with f4: f_bed  = st.selectbox("Filter by bedrooms", ["All","1BR","2BR","3BR","4BR","5BR","6BR+"])
+    with f1: f_sup  = st.selectbox("Filter by supplier", ["All"] + sup_names, use_container_width=True)
+    with f2: f_cat  = st.selectbox("Filter by amenity", CAT_OPTS, use_container_width=True)
+    with f3: f_type = st.selectbox("Filter by type", ["All","🏠 Unit","🏢 Supplier"], use_container_width=True)
+    with f4: f_bed  = st.selectbox("Filter by bedrooms", ["All","1BR","2BR","3BR","4BR","5BR","6BR+"], use_container_width=True)
     with f5: f_prop = st.text_input("Search", placeholder="Property name...")
     if st.button("🔄  Refresh"): st.rerun()
 
