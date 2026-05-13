@@ -326,6 +326,106 @@ def create_google_maps_link(address: str) -> str:
     encoded = urllib.parse.quote(address.strip())
     return f"https://www.google.com/maps/search/{encoded}"
 
+
+def detect_address_in_unit_label(unit_label: str) -> str:
+    """
+    Detect if unit_label contains an address pattern (Street, City, State)
+    Returns the detected address string, or empty string if not found
+    """
+    if not unit_label or not isinstance(unit_label, str):
+        return ""
+    
+    unit_label = unit_label.strip()
+    
+    # Pattern: looks for format like "123 Main St, Denver, CO" or "104 8th Ave, Ouray, CO"
+    # Must have: number, street name, comma, city, comma, state (2 letters)
+    pattern = r'^\d+\s+[A-Za-z\s]+(?:St|Ave|Rd|Blvd|Ln|Dr|Court|Ct|Drive|Street|Avenue|Road|Boulevard|Lane),\s+[A-Za-z\s]+,\s+[A-Z]{2}$'
+    
+    if re.match(pattern, unit_label):
+        return unit_label
+    
+    return ""
+
+def geocode_address(address: str) -> dict:
+    """
+    Use Google Maps Geocoding API to get complete address with zip code
+    Returns dict with 'address' (complete) and 'success' (bool)
+    """
+    if not address or not address.strip():
+        return {"address": "", "success": False}
+    
+    try:
+        import requests
+        api_key = st.secrets.get("GOOGLE_MAPS_API_KEY")
+        if not api_key:
+            return {"address": address, "success": False, "error": "API key not configured"}
+        
+        url = "https://maps.googleapis.com/maps/api/geocode/json"
+        params = {
+            "address": address.strip(),
+            "key": api_key
+        }
+        
+        response = requests.get(url, params=params, timeout=5)
+        data = response.json()
+        
+        if data.get("status") == "OK" and data.get("results"):
+            # Get the first result's formatted address (includes zip)
+            formatted_address = data["results"][0].get("formatted_address", "")
+            return {"address": formatted_address, "success": True}
+        else:
+            return {"address": address, "success": False, "error": data.get("status", "Unknown error")}
+    
+    except Exception as e:
+        return {"address": address, "success": False, "error": str(e)}
+
+
+
+def migrate_addresses_from_unit_labels():
+    """
+    One-time migration: scan all existing entries where address is empty
+    and detect/geocode addresses from unit_label field
+    """
+    try:
+        # Get all entries with empty address
+        rows = supabase.table("knowledge_base").select("id,unit_label,address").is_("address", "null").execute().data or []
+        
+        updated = 0
+        failed = 0
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        for i, row in enumerate(rows):
+            unit_label = row.get("unit_label", "").strip()
+            
+            # Try to detect address in unit_label
+            detected_addr = detect_address_in_unit_label(unit_label)
+            
+            if detected_addr:
+                # Geocode to get complete address with zip
+                geocode_result = geocode_address(detected_addr)
+                if geocode_result.get("success"):
+                    complete_addr = geocode_result.get("address", "")
+                    # Update the entry
+                    supabase.table("knowledge_base").update({"address": complete_addr}).eq("id", row["id"]).execute()
+                    updated += 1
+                else:
+                    failed += 1
+            
+            # Update progress
+            progress = (i + 1) / len(rows)
+            progress_bar.progress(progress)
+            status_text.text(f"Processing: {i+1}/{len(rows)} | Updated: {updated} | Failed: {failed}")
+        
+        progress_bar.empty()
+        status_text.empty()
+        
+        return {"updated": updated, "failed": failed, "total": len(rows)}
+    
+    except Exception as e:
+        return {"error": str(e)}
+
 def construct_sentinel_url(supplier_id: int, vhc_id: str) -> str:
     """Build Sentinel URL from supplier ID and VHC ID"""
     if not supplier_id or not vhc_id:
@@ -1039,6 +1139,16 @@ with tab_upload:
                         starter_kit = e.get("starter_kit", "") or e.get("Starter Kit", "")
                         coffee_machine = e.get("coffee_machine_type", "") or e.get("Coffee Machine Type", "")
                         address = e.get("address", "") or e.get("Address", "")
+                        
+                        # If address is empty, try to detect it from unit_label and geocode
+                        if not address:
+                            unit_label = e.get("unit_label", "")
+                            detected_addr = detect_address_in_unit_label(unit_label)
+                            if detected_addr:
+                                geocode_result = geocode_address(detected_addr)
+                                if geocode_result.get("success"):
+                                    address = geocode_result.get("address", "")
+                        
                         save_entry(vhc, prop, q, e.get("answer",""), f"File: {filename}", by, supplier, e.get("unit_label",""), "", sent_url, k_type, bedrooms, starter_kit, coffee_machine, address)
                         saved += 1
                     except Exception as ex: st.error(f"Error: {ex}")
@@ -1342,6 +1452,22 @@ with tab_suppliers:
                 except Exception as e:
                     st.warning("Already exists." if "unique" in str(e).lower() else f"Error: {e}")
             else: st.error("Enter a supplier name.")
+    st.markdown("---")
+    
+    # Address migration button
+    st.markdown("**🤖 Address Intelligence**")
+    col_mig1, col_mig2 = st.columns([2, 1])
+    with col_mig1:
+        st.caption("Automatically populate addresses from unit labels and geocode them with Google Maps to include zip codes.")
+    with col_mig2:
+        if st.button("🚀 Auto-Populate Addresses", key="migrate_addresses"):
+            st.info("⏳ Running address detection and geocoding... this may take a minute.")
+            result = migrate_addresses_from_unit_labels()
+            if "error" in result:
+                st.error(f"Error: {result['error']}")
+            else:
+                st.success(f"✅ Migration complete!\n- **Updated:** {result['updated']} addresses\n- **Failed:** {result['failed']}\n- **Total entries scanned:** {result['total']}")
+    
     st.markdown("---")
     sups = get_suppliers()
     st.markdown(f"**{len(sups)} supplier{'s' if len(sups)!=1 else ''}** — Click ✏️ Edit next to any supplier")
