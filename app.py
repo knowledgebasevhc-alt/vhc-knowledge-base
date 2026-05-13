@@ -1798,7 +1798,9 @@ with tab_view:
                         st.session_state[edit_key] = False
                         st.rerun()
 
-            st.markdown("<div style='border-top:1.5px solid #333;margin:4px 0;'></div>", unsafe_allow_html=True)st.markdown("""
+            st.markdown("<div style='border-top:1.5px solid #333;margin:4px 0;'></div>", unsafe_allow_html=True)
+
+st.markdown("""
 <style>
 /* ═══════════════════════════════════════════════════════════════════════════
    VACAYHOME KNOWLEDGE BASE - BRAND DESIGN THEME
