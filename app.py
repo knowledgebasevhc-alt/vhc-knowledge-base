@@ -1700,10 +1700,10 @@ with tab_view:
     
     sup_names = get_supplier_names()
     f1,f2,f3,f4,f5 = st.columns([1.5, 1.5, 1.5, 1.5, 1.2])
-    with f1: f_sup  = st.selectbox("Filter by supplier", ["All"] + sup_names, use_container_width=True)
-    with f2: f_cat  = st.selectbox("Filter by amenity", CAT_OPTS, use_container_width=True)
-    with f3: f_type = st.selectbox("Filter by type", ["All","🏠 Unit","🏢 Supplier"], use_container_width=True)
-    with f4: f_bed  = st.selectbox("Filter by bedrooms", ["All","1BR","2BR","3BR","4BR","5BR","6BR+"], use_container_width=True)
+    with f1: f_sup  = st.selectbox("Filter by supplier", ["All"] + sup_names)
+    with f2: f_cat  = st.selectbox("Filter by amenity", CAT_OPTS)
+    with f3: f_type = st.selectbox("Filter by type", ["All","🏠 Unit","🏢 Supplier"])
+    with f4: f_bed  = st.selectbox("Filter by bedrooms", ["All","1BR","2BR","3BR","4BR","5BR","6BR+"])
     with f5: f_prop = st.text_input("Search", placeholder="Property name...")
     if st.button("🔄  Refresh"): st.rerun()
 
