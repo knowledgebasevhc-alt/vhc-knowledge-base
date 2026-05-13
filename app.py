@@ -718,6 +718,40 @@ st.title("🏠 VHC Knowledge Base")
 st.caption("Your team's single source of truth for property information.")
 st.markdown("---")
 
+# ══ AUTO ADDRESS MIGRATION ════════════════════════════════════════════════════
+# Silently scan all entries with empty address, detect address in unit_label,
+# geocode with Google Maps, and update. Runs once per session.
+if not st.session_state.get("address_migration_done"):
+    try:
+        rows_to_fix = supabase.table("knowledge_base") \
+            .select("id,unit_label,address") \
+            .is_("address", "null") \
+            .execute().data or []
+        
+        # Also grab rows where address is empty string (not just null)
+        rows_empty = supabase.table("knowledge_base") \
+            .select("id,unit_label,address") \
+            .eq("address", "") \
+            .execute().data or []
+        
+        all_rows = {r["id"]: r for r in rows_to_fix + rows_empty}.values()
+        
+        for row in all_rows:
+            unit_label = (row.get("unit_label") or "").strip()
+            detected = detect_address_in_unit_label(unit_label)
+            if detected:
+                geocode_result = geocode_address(detected)
+                complete_addr = geocode_result.get("address", "") if geocode_result.get("success") else detected
+                if complete_addr:
+                    supabase.table("knowledge_base") \
+                        .update({"address": complete_addr}) \
+                        .eq("id", row["id"]) \
+                        .execute()
+    except Exception:
+        pass  # Silent fail — never block the app from loading
+    
+    st.session_state["address_migration_done"] = True
+
 tab_search, tab_upload, tab_add, tab_suppliers, tab_view = st.tabs([
     "🔍  Search", "📤  Bulk Upload", "➕  Add Entry", "🏢  Suppliers", "📋  View / Edit All"
 ])
