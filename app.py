@@ -1026,16 +1026,6 @@ You can contact the supplier to find out, then save the answer using <b>Add Entr
                     meta = json.loads(parts[1].strip())
                 except: pass
 
-            # Only show property cards when a specific VHC ID is in the query
-            all_kb_rows = supabase.table("knowledge_base").select("*").execute().data or []
-            matched_rows = []
-            qlow = query.lower()
-            for r in all_kb_rows:
-                rv = (r.get("vhc_id","") or "").strip().lower()
-                # Only match if the exact VHC ID is in the query
-                if rv and rv in qlow:
-                    matched_rows.append(r)
-
             # Show the answer
             st.markdown(f"""
 <div class='green-result'>
@@ -1044,89 +1034,20 @@ You can contact the supplier to find out, then save the answer using <b>Add Entr
 </div>
 """, unsafe_allow_html=True)
 
-            # If we found matching rows, show full clickable property cards
-            if matched_rows:
-                seen_ids = set()
-                sup_lookup = {s["name"]: s.get("website","") or "" for s in get_suppliers()}
-                for mrow in matched_rows:
-                    if mrow["id"] in seen_ids: continue
-                    seen_ids.add(mrow["id"])
-
-                    sup      = mrow.get("supplier_name","") or ""
-                    vhc      = mrow.get("vhc_id","") or ""
-                    unit     = mrow.get("unit_label","") or ""
-                    cat      = mrow.get("question_category","") or "Other"
-                    sup_lnk  = mrow.get("supplier_url","") or ""
-                    sent_lnk = mrow.get("sentinel_url","") or ""
-                    sup_main = sup_lookup.get(sup,"")
-                    prop     = mrow.get("property_name","") or ""
-                    q_txt    = mrow.get("question","") or ""
-                    a_txt    = mrow.get("answer","") or ""
-                    src      = mrow.get("source","") or ""
-                    by       = mrow.get("added_by","") or ""
-                    date     = (mrow.get("created_at","") or "")[:10]
-
-                    links_html = ""
-                    if sup_main:  links_html += f"<a href='{sup_main}' target='_blank' style='font-size:13px;margin-right:16px;text-decoration:none;color:#5a9e8f;'><u><b>Supplier Website</b></u></a>"
-                    if sup_lnk:  links_html += f"<a href='{sup_lnk}'  target='_blank' style='font-size:13px;margin-right:16px;text-decoration:none;color:#5a9e8f;'>🔗 View on supplier site</a>"
-                    if sent_lnk: links_html += f"<a href='{sent_lnk}' target='_blank' style='font-size:13px;text-decoration:none;color:#5a9e8f;'>🔗 View in Sentinel</a>"
-
-                    sub_parts = " &nbsp;·&nbsp; ".join(filter(None,[
-                        f"VHC: {vhc}"   if vhc  else "",
-                        f"Unit: {unit}" if unit else "",
-                        f"Supplier: {sup}" if sup else "",
-                        cat
-                    ]))
-
-                    # Make result clickable with a button
-                    expand_key = f"search_expand_{mrow['id']}"
-                    if "search_results_expanded" not in st.session_state:
-                        st.session_state["search_results_expanded"] = {}
-
-                    if st.button(f"🏠 {prop}", key=f"search_btn_{mrow['id']}", help="Click to view full details"):
-                        if expand_key not in st.session_state["search_results_expanded"]:
-                            st.session_state["search_results_expanded"][expand_key] = False
-                        st.session_state["search_results_expanded"][expand_key] = not st.session_state["search_results_expanded"][expand_key]
-                        st.rerun()
-
-                    if st.session_state["search_results_expanded"].get(expand_key, False):
-                        st.markdown(f"""
-<div style='background:#f8f9fa;border-left:4px solid #5a9e8f;border-radius:0 10px 10px 0;
-     padding:18px 22px;margin:12px 0;'>
-  <div style='font-size:12px;color:gray;margin-bottom:12px;'>{sub_parts}</div>
-  <div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:13px;margin-bottom:12px;'>
-    <div><b>Source:</b> {src}</div>
-    <div><b>Added by:</b> {by}</div>
-    <div><b>Date saved:</b> {date}</div>
-  </div>
-  {'<div style="background:white;border-radius:6px;padding:12px;margin-bottom:12px;">'
-   '<div style="font-size:12px;color:gray;font-weight:500;margin-bottom:4px;">QUESTION</div>'
-   '<div style="font-size:14px;margin-bottom:8px;">'+q_txt+'</div>'
-   '<div style="font-size:12px;color:gray;font-weight:500;margin-bottom:4px;">ANSWER</div>'
-   '<div style="font-size:14px;">'+a_txt+'</div>'
-   '</div>' if q_txt else ''}
-  {'<div style="padding-top:10px;border-top:0.5px solid #ddd;"><a href="'+sup_main+'" target="_blank" style="font-size:13px;margin-right:16px;text-decoration:none;"><u><b>Supplier Website</b></u></a>' + 
-   ('<a href="'+sup_lnk+'" target="_blank" style="font-size:13px;margin-right:16px;text-decoration:none;">🔗 View on supplier site</a>' if sup_lnk else '') + 
-   ('<a href="'+sent_lnk+'" target="_blank" style="font-size:13px;text-decoration:none;">🔗 View in Sentinel</a>' if sent_lnk else '') + 
-   '</div>' if sup_main or sup_lnk or sent_lnk else ''}
-</div>
-""", unsafe_allow_html=True)
-
-            else:
-                # Fallback: show meta pills and links without full card
-                pills = []
-                if meta.get("supplier"):  pills.append(meta["supplier"])
-                if meta.get("added_by"): pills.append(f"Added by: {meta['added_by']}")
-                if meta.get("source"):   pills.append(f"Source: {meta['source']}")
-                if meta.get("date"):     pills.append(meta["date"][:10])
-                if pills:
-                    pill_html = " ".join(f"<span style='display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;border:0.5px solid #ddd;color:gray;margin:2px;'>{p}</span>" for p in pills)
-                    st.markdown(pill_html, unsafe_allow_html=True)
-                lc1,lc2,lc3 = st.columns(3)
-                if meta.get("supplier_url"):
-                    with lc1: st.link_button("🔗 View on Supplier Website", meta["supplier_url"])
-                if meta.get("sentinel_url"):
-                    with lc2: st.link_button("🔗 View in Sentinel", meta["sentinel_url"])
+            # Show meta pills and links if available
+            pills = []
+            if meta.get("supplier"):  pills.append(meta["supplier"])
+            if meta.get("added_by"): pills.append(f"Added by: {meta['added_by']}")
+            if meta.get("source"):   pills.append(f"Source: {meta['source']}")
+            if meta.get("date"):     pills.append(meta["date"][:10])
+            if pills:
+                pill_html = " ".join(f"<span style='display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;border:0.5px solid #ddd;color:gray;margin:2px;'>{p}</span>" for p in pills)
+                st.markdown(pill_html, unsafe_allow_html=True)
+            lc1,lc2,lc3 = st.columns(3)
+            if meta.get("supplier_url"):
+                with lc1: st.link_button("🔗 View on Supplier Website", meta["supplier_url"])
+            if meta.get("sentinel_url"):
+                with lc2: st.link_button("🔗 View in Sentinel", meta["sentinel_url"])
 
             st.markdown("<div class='tip-box'>Not what you were looking for? Go to <strong>Add Entry</strong> to save new information for this property.</div>", unsafe_allow_html=True)
 
