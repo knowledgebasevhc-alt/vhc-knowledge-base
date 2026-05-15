@@ -1026,17 +1026,14 @@ You can contact the supplier to find out, then save the answer using <b>Add Entr
                     meta = json.loads(parts[1].strip())
                 except: pass
 
-            # Try to find the matching row(s) in the database for full detail view
+            # Only show property cards when a specific VHC ID is in the query
             all_kb_rows = supabase.table("knowledge_base").select("*").execute().data or []
             matched_rows = []
-            ans_lower = answer_text.lower()
+            qlow = query.lower()
             for r in all_kb_rows:
-                rp = (r.get("property_name","") or "").lower()
-                rv = (r.get("vhc_id","") or "").lower()
-                rq = (r.get("question","") or "").lower()
-                ra = (r.get("answer","") or "").lower()
-                qlow = query.lower()
-                if (rv and rv in qlow) or (rp and rp in ans_lower) or                    (ra and ra[:60] in ans_lower) or (rq and rq in ans_lower):
+                rv = (r.get("vhc_id","") or "").strip().lower()
+                # Only match if the exact VHC ID is in the query
+                if rv and rv in qlow:
                     matched_rows.append(r)
 
             # Show the answer
@@ -1191,6 +1188,9 @@ with tab_upload:
             key=f"up_type_{st.session_state['up_form_key']}"
         )
         
+        up_by = st.text_input("Your name *", placeholder="e.g. Maria",
+                              key=f"up_by_{st.session_state['up_form_key']}")
+
         # Manual entry option for Supplier Q&A
         if "🏢" in up_type:
             st.markdown("---")
@@ -1230,8 +1230,6 @@ with tab_upload:
         
         up_file = st.file_uploader("Choose a file", type=["csv","xlsx","xls","txt","pdf","docx","md"],
                                    key=f"up_file_{st.session_state['up_form_key']}")
-        up_by   = st.text_input("Your name *", placeholder="e.g. Maria",
-                                key=f"up_by_{st.session_state['up_form_key']}")
 
         if up_file and up_by and up_sup != "— Select —":
             if st.button("🤖  Analyze & Extract Information", type="primary"):
@@ -2576,305 +2574,3 @@ hr {
 
 </style>
 """, unsafe_allow_html=True)
-
-
-# ── Custom CSS ─────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-.big-search input {font-size:18px !important; padding:14px !important;}
-.green-result {border-left:4px solid #5a9e8f;padding:16px 20px;background:var(--background-color);border-radius:0 8px 8px 0;margin:8px 0;}
-.result-tag {font-size:11px;font-weight:600;color:#3B6D11;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px;}
-.result-body {font-size:16px;line-height:1.65;}
-.tip-box {padding:12px 16px;border:1px solid #ddd;border-radius:8px;font-size:13px;color:#888;margin-top:12px;}
-.qa-pair {background:#f8f8f8;border-radius:8px;padding:14px;margin-bottom:10px;}
-</style>
-""", unsafe_allow_html=True)
-
-# ── Password ───────────────────────────────────────────────────────────────────
-import hashlib as _hl
-
-def _token(pw: str) -> str:
-    return _hl.sha256(pw.encode()).hexdigest()[:16]
-
-def check_password():
-    correct_token = _token(st.secrets["APP_PASSWORD"])
-
-    # Check URL token first (persists across refreshes)
-    params = st.query_params
-    if params.get("auth") == correct_token:
-        st.session_state["password_correct"] = True
-        return True
-
-    # Check session state
-    if st.session_state.get("password_correct"):
-        return True
-
-    # Show login form
-    def password_entered():
-        if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
-            st.session_state["password_correct"] = True
-            st.query_params["auth"] = correct_token
-            del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
-
-    st.markdown("## 🏠 VHC Knowledge Base")
-    st.text_input("Enter team password:", type="password",
-                  on_change=password_entered, key="password")
-    if st.session_state.get("password_correct") == False:
-        st.error("❌ Incorrect password.")
-    return False
-
-if not check_password():
-    st.stop()
-
-# ── Connections ────────────────────────────────────────────────────────────────
-@st.cache_resource
-def init_supabase():
-    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-
-@st.cache_resource
-def init_groq():
-    return Groq(api_key=st.secrets["GROQ_API_KEY"])
-
-supabase = init_supabase()
-client   = init_groq()
-MODEL    = "llama-3.3-70b-versatile"
-
-SOURCE_OPTS = ["Supplier email","Supplier phone call","Supplier website","Airbnb listing","VRBO listing","Other"]
-CAT_OPTS    = ["All","Pet Policy","Pool","Accessibility","Parking","Bedding","Fees","Beach","WiFi","TV & Entertainment","Grill","Front Desk","Other"]
-EXAMPLE_QS  = ["Are pets allowed?","What is the pet fee?","Is pool heating available?","How many steps to the unit?","Is there a hot tub?","Is there a grill?","What type of TV?","Is parking free?"]
-
-# ── AI ─────────────────────────────────────────────────────────────────────────
-def ask_ai(prompt: str) -> str:
-    r = client.chat.completions.create(
-        model=MODEL,
-        messages=[{"role":"user","content":prompt}],
-        temperature=0.1, max_tokens=2048)
-    return r.choices[0].message.content
-
-# ── Categorize ─────────────────────────────────────────────────────────────────
-def categorize(q: str) -> str:
-    q = q.lower()
-    if "pet" in q:                                                              return "Pet Policy"
-    elif any(w in q for w in ["pool","hot tub","jacuzzi","spa"]):               return "Pool"
-    elif any(w in q for w in ["step","access","walk","handicap","elderly","wheelchair"]): return "Accessibility"
-    elif "park" in q:                                                           return "Parking"
-    elif any(w in q for w in ["bed","linen","sleep","pillow"]):                 return "Bedding"
-    elif any(w in q for w in ["fee","cost","price","charge"]):                  return "Fees"
-    elif "beach" in q:                                                          return "Beach"
-    elif any(w in q for w in ["wifi","internet","wireless"]):                   return "WiFi"
-    elif any(w in q for w in ["tv","television","streaming","cable","smart","netflix"]): return "TV & Entertainment"
-    elif any(w in q for w in ["grill","bbq","barbecue"]):                       return "Grill"
-    elif any(w in q for w in ["front desk","concierge","reception"]):           return "Front Desk"
-    else:                                                                       return "Other"
-
-def extract_bedrooms(prop_name: str) -> int:
-    """Extract bedroom count from property name using regex"""
-    import re
-    if not prop_name or not isinstance(prop_name, str):
-        return None
-    name_lower = str(prop_name).lower()
-    # Pattern: "3BR" or "3 BR" or "3-BR" or "3 bed"
-    match = re.search(r'(\d+)\s*(?:br|bed|bedroom)', name_lower)
-    if match:
-        return int(match.group(1))
-    return None
-
-def construct_sentinel_url(supplier_id: int, vhc_id: str) -> str:
-    """Build Sentinel URL from supplier ID and VHC ID"""
-    if not supplier_id or not vhc_id:
-        return ""
-    return f"https://sentinel.vacayhomeconnect.com/suppliers/{supplier_id}/properties/{vhc_id}/overview"
-
-# ── Supplier helpers ───────────────────────────────────────────────────────────
-@st.cache_data(ttl=30)
-def get_suppliers():
-    return supabase.table("suppliers").select("*").order("name").execute().data or []
-
-def get_supplier_names():
-    return [s["name"] for s in get_suppliers()]
-
-def get_supplier_website(name: str) -> str:
-    rows = supabase.table("suppliers").select("website").eq("name", name).execute().data
-    return (rows[0].get("website","") if rows else "") or ""
-
-def ensure_supplier(name: str):
-    if not name or not name.strip(): return
-    if name.strip() not in get_supplier_names():
-        try:
-            supabase.table("suppliers").insert({"name":name.strip(),"website":""}).execute()
-            get_suppliers.clear()
-        except: pass
-
-BADGE_COLORS = [
-    "background:#E6F1FB;color:#0C447C","background:#E1F5EE;color:#085041",
-    "background:#FAEEDA;color:#633806","background:#FAECE7;color:#4A1B0C",
-    "background:#EEEDFE;color:#26215C","background:#FBEAF0;color:#4B1528",
-    "background:#EAF3DE;color:#173404",
-]
-def badge_style(name: str) -> str:
-    return BADGE_COLORS[hash(name or "") % len(BADGE_COLORS)]
-
-# ── DB helpers ─────────────────────────────────────────────────────────────────
-def save_entry(vhc_id, property_name, question, answer, source, added_by,
-               supplier_name="", unit_label="", supplier_url="", sentinel_url="",
-               knowledge_type="unit", bedrooms=None, starter_kit="", coffee_machine_type="", address=""):
-    supabase.table("knowledge_base").insert({
-        "vhc_id":            vhc_id or "",
-        "unit_label":        unit_label or "",
-        "property_name":     property_name or "",
-        "question_category": categorize(question) if question else "Other",
-        "question":          question or "",
-        "answer":            answer or "",
-        "source":            source or "",
-        "added_by":          added_by or "",
-        "supplier_name":     supplier_name or "",
-        "supplier_url":      supplier_url or "",
-        "sentinel_url":      sentinel_url or "",
-        "knowledge_type":    knowledge_type or "unit",
-        "bedrooms":          bedrooms,
-        "starter_kit":       starter_kit or "",
-        "coffee_machine_type": coffee_machine_type or "",
-        "address":           address or "",
-        "updated_at":        datetime.utcnow().isoformat()
-    }).execute()
-
-def update_entry(row_id, data: dict):
-    data["question_category"] = categorize(data.get("question","")) if data.get("question") else "Other"
-    data["updated_at"]        = datetime.utcnow().isoformat()
-    if "knowledge_type" not in data:
-        data["knowledge_type"] = "unit"
-    supabase.table("knowledge_base").update(data).eq("id", row_id).execute()
-
-def delete_entry(entry_id: int):
-    supabase.table("knowledge_base").delete().eq("id", entry_id).execute()
-
-def is_duplicate(property_name, question, vhc_id=""):
-    if not question: return False
-    all_rows = supabase.table("knowledge_base").select("property_name,question,vhc_id").execute().data
-    p, q = (property_name or "").lower().strip(), (question or "").lower().strip()
-    for r in all_rows:
-        rp = (r.get("property_name","") or "").lower().strip()
-        rq = (r.get("question","") or "").lower().strip()
-        rv = (r.get("vhc_id","") or "").strip()
-        if rq == q and (rp == p or (vhc_id and rv == vhc_id.strip())):
-            return True
-    return False
-
-# ── File helpers ───────────────────────────────────────────────────────────────
-def file_hash(raw: bytes) -> str:
-    return hashlib.md5(raw).hexdigest()
-
-def file_already_uploaded(fhash: str):
-    rows = supabase.table("uploaded_files").select("*").eq("file_hash", fhash).execute().data
-    return rows[0] if rows else None
-
-def register_file(fhash, fname, supplier, uploaded_by):
-    try:
-        supabase.table("uploaded_files").insert({
-            "file_hash":fhash,"file_name":fname,
-            "supplier_name":supplier,"uploaded_by":uploaded_by
-        }).execute()
-    except: pass
-
-def scrape(url: str, query: str) -> str:
-    try:
-        soup = BeautifulSoup(requests.get(url, headers={"User-Agent":"Mozilla/5.0"}, timeout=15).content, "html.parser")
-        for t in soup(["script","style","nav","footer","header"]): t.decompose()
-        text = soup.get_text(" ", strip=True)[:6000]
-        return ask_ai(f'Search for: "{query}"\n\nWebsite text:\n{text}\n\nIf found: FOUND: [answer]. If not: NOT_FOUND')
-    except Exception as e: return f"ERROR: {e}"
-
-def search_kb(query: str) -> str:
-    rows = supabase.table("knowledge_base").select("*").execute().data
-    if not rows: return "NOT_FOUND"
-
-    q_lower  = query.lower()
-    q_words  = set(q_lower.split())
-    stop_words = {"a","an","the","is","are","do","does","can","for","of","to","in",
-                  "at","on","it","i","we","my","what","how","when","where","who",
-                  "which","this","that","with","have","has","be","was","will","would",
-                  "there","their","they","your","get","any","all","some","just","not"}
-    keywords = [w.strip("?.,!") for w in q_words
-                if len(w.strip("?.,!")) > 2 and w.strip("?.,!") not in stop_words]
-
-    def score_row(r):
-        # Combine all text fields for matching
-        text = " ".join(str(v) for v in [
-            r.get("property_name",""), r.get("unit_label",""),
-            r.get("vhc_id",""), r.get("supplier_name",""),
-            r.get("question",""), r.get("answer","")
-        ] if v).lower()
-        
-        # Boost score for VHC ID exact matches
-        score = 0
-        vhc_id = (r.get("vhc_id","") or "").strip()
-        if vhc_id and query.strip() == vhc_id:
-            return 1000  # Exact VHC ID match gets highest priority
-        
-        # Regular keyword scoring
-        score += sum(2 if kw in (r.get("property_name","") or "").lower()
-                     else 1 for kw in keywords if kw in text)
-        return score
-
-    scored = sorted(rows, key=score_row, reverse=True)
-
-    # Split: rows with answers vs property-only registrations
-    with_answers    = [r for r in scored if (r.get("question") or "").strip() and (r.get("answer") or "").strip()]
-    without_answers = [r for r in scored if not (r.get("question") or "").strip()]
-    supplier_rows   = [r for r in rows   if r.get("knowledge_type") == "supplier"
-                       and (r.get("answer") or "").strip()]
-
-    # Top candidates with answers
-    candidates = with_answers[:40]
-    # Always include supplier Q&A
-    for sr in supplier_rows:
-        if sr not in candidates:
-            candidates.append(sr)
-    candidates = candidates[:60]
-
-    # Check if any property NAMES match the query (even without answers)
-    matched_props = [r for r in without_answers
-                     if score_row(r) >= 2][:5]
-
-    # Step 1: try to find an answer
-    if candidates:
-        prompt = f"""You are an intelligent assistant for a vacation rental company called VacayHome.
-A team member asked: "{query}"
-
-Below are relevant knowledge base entries:
-{json.dumps(candidates, indent=2, default=str)[:9000]}
-
-Instructions:
-- Search for entries that answer the question directly OR contain related information.
-- Supplier-level entries (knowledge_type=supplier) apply to ALL units from that supplier.
-- Unit-level entries (knowledge_type=unit) apply to one specific property.
-
-INTELLIGENT SYNTHESIS:
-- If multiple units from the same supplier have the same answer, synthesize: "All [Supplier] units [answer]" or "None of the [Supplier] units [answer]"
-- Example: Query "Are any AlpenGlo units pet friendly?" + Data shows all AlpenGlo units say "No pets" → Answer: "None of the AlpenGlo units are pet friendly. All AlpenGlo properties prohibit pets."
-- If you find patterns across multiple units, summarize them intelligently.
-- If you find a clear direct answer, provide it with property name, supplier, and links.
-
-RESPONSE FORMAT:
-- If you can answer (directly or by synthesis), provide a clear natural language response.
-- Include this footer on a new line:
-  META: {{"supplier":"...","added_by":"...","source":"...","date":"...","supplier_url":"...","sentinel_url":"..."}}
-- ONLY respond "NO_ANSWER" if the entries contain NO information related to the query at all.
-- Never invent information not in the entries."""
-        result = ask_ai(prompt)
-        if "NO_ANSWER" not in result and "NOT_FOUND" not in result:
-            return result
-
-    # Step 2: property is registered but no answer yet
-    if matched_props:
-        prop = matched_props[0]
-        pname  = prop.get("property_name","") or ""
-        sup    = prop.get("supplier_name","")  or ""
-        vhc    = prop.get("vhc_id","")         or ""
-        slnk   = prop.get("supplier_url","")   or ""
-        senlnk = prop.get("sentinel_url","")   or ""
-        return (f"PROPERTY_FOUND|{pname}|{sup}|{vhc}|{slnk}|{senlnk}")
-
-    return "NOT_FOUND"
