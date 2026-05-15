@@ -816,11 +816,13 @@ def search_kb(query: str) -> str:
             r.get("question",""), r.get("answer","")
         ] if v).lower()
         
-        # Boost score for VHC ID exact matches
         score = 0
-        vhc_id = (r.get("vhc_id","") or "").strip()
-        if vhc_id and query.strip() == vhc_id:
-            return 1000  # Exact VHC ID match gets highest priority
+        vhc_id = (r.get("vhc_id","") or "").strip().lower()
+        
+        # STRONG boost if VHC ID appears ANYWHERE in the query
+        # Example: "Does 193923 have a pool?" contains "193923" → boost
+        if vhc_id and vhc_id in q_lower:
+            score += 500
         
         # Regular keyword scoring
         score += sum(2 if kw in (r.get("property_name","") or "").lower()
