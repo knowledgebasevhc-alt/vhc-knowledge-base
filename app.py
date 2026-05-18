@@ -809,23 +809,31 @@ def search_kb(query: str) -> str:
                 if len(w.strip("?.,!")) > 2 and w.strip("?.,!") not in stop_words]
 
     def score_row(r):
+        property_name = (r.get("property_name","") or "").lower()
+        vhc_id = (r.get("vhc_id","") or "").strip().lower()
+        
         # Combine all text fields for matching
         text = " ".join(str(v) for v in [
-            r.get("property_name",""), r.get("unit_label",""),
-            r.get("vhc_id",""), r.get("supplier_name",""),
+            property_name, r.get("unit_label",""),
+            vhc_id, r.get("supplier_name",""),
             r.get("question",""), r.get("answer","")
         ] if v).lower()
         
         score = 0
-        vhc_id = (r.get("vhc_id","") or "").strip().lower()
         
-        # STRONG boost if VHC ID appears ANYWHERE in the query
-        # Example: "Does 193923 have a pool?" contains "193923" → boost
+        # HIGHEST PRIORITY: VHC ID exact match
         if vhc_id and vhc_id in q_lower:
-            score += 500
+            score += 1000
+        
+        # HIGH PRIORITY: Direct property name matches
+        # If a keyword is 4+ characters and appears in property name, big boost
+        for kw in keywords:
+            if len(kw) >= 4 and kw in property_name:
+                # Longer keywords get bigger boost (more specific)
+                score += 50 * len(kw)
         
         # Regular keyword scoring
-        score += sum(2 if kw in (r.get("property_name","") or "").lower()
+        score += sum(2 if kw in property_name
                      else 1 for kw in keywords if kw in text)
         return score
 
@@ -1004,6 +1012,23 @@ with tab_search:
             st.warning(f"🔍  **{pname}** is in your knowledge base but we don't have the answer to this specific question yet.")
             sup_lookup_s = {s["name"]: s.get("website","") or "" for s in get_suppliers()}
             sup_main = sup_lookup_s.get(sup,"")
+            
+            # Validate URLs before displaying links
+            valid_links = []
+            if sup_main and str(sup_main).strip() and sup_main.startswith("http"):
+                valid_links.append((sup_main, "<b><u>Supplier Website</u></b>"))
+            if slnk and str(slnk).strip() and slnk != "None" and slnk.startswith("http"):
+                valid_links.append((slnk, "🔗 Property page"))
+            if senlnk and str(senlnk).strip() and senlnk != "None" and senlnk.startswith("http"):
+                valid_links.append((senlnk, "🔗 Sentinel"))
+            
+            links_html = ""
+            if valid_links:
+                links_html = "<div style='margin-top:10px;'>" + "".join([
+                    f"<a href='{url}' target='_blank' style='font-size:12px;margin-right:16px;color:#5a9e8f;text-decoration:underline;'>{label}</a>"
+                    for url, label in valid_links
+                ]) + "</div>"
+            
             st.markdown(f"""
 <div style='background:#f0f4fb;border-left:4px solid #1956d2;border-radius:0 4px 4px 0;padding:14px 18px;margin:8px 0;border:1px solid #e0e0e0;'>
 <div style='font-size:15px;font-weight:600;margin-bottom:8px;color:#1956d2;'>🏠 {pname}</div>
@@ -1012,7 +1037,7 @@ with tab_search:
 </div>
 <div style='font-size:13px;color:#333;'>We don't have this information saved yet.
 You can contact the supplier to find out, then save the answer using <b>Add Entry</b>.</div>
-{"<div style='margin-top:10px;'>"+"".join([f"<a href='{l}' target='_blank' style='font-size:12px;margin-right:16px;color:#5a9e8f;text-decoration:underline;'>"+n+"</a>" for l,n in [(sup_main,"<b><u>Supplier Website</u></b>"),(slnk,"🔗 Property page"),(senlnk,"🔗 Sentinel")] if l])+"</div>" if any([sup_main,slnk,senlnk]) else ""}
+{links_html}
 </div>
 """, unsafe_allow_html=True)
             st.markdown("<div class='tip-box'>Once you get the answer, go to <strong>Add Entry → Unit Question</strong> to save it permanently.</div>", unsafe_allow_html=True)
