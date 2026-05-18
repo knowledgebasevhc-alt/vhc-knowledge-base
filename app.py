@@ -1045,11 +1045,16 @@ You can contact the supplier to find out, then save the answer using <b>Add Entr
             if pills:
                 pill_html = " ".join(f"<span style='display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;border:0.5px solid #ddd;color:gray;margin:2px;'>{p}</span>" for p in pills)
                 st.markdown(pill_html, unsafe_allow_html=True)
-            lc1,lc2,lc3 = st.columns(3)
-            if meta.get("supplier_url"):
-                with lc1: st.link_button("🔗 View on Supplier Website", meta["supplier_url"])
-            if meta.get("sentinel_url"):
-                with lc2: st.link_button("🔗 View in Sentinel", meta["sentinel_url"])
+            
+            # Only show link buttons if URLs are valid (not None, not empty, not "None" string)
+            supplier_url = meta.get("supplier_url", "")
+            sentinel_url = meta.get("sentinel_url", "")
+            
+            # Validate URLs are actual URLs (start with http)
+            if supplier_url and str(supplier_url).strip() and supplier_url != "None" and supplier_url.startswith("http"):
+                st.link_button("🔗 View on Supplier Website", supplier_url)
+            if sentinel_url and str(sentinel_url).strip() and sentinel_url != "None" and sentinel_url.startswith("http"):
+                st.link_button("🔗 View in Sentinel", sentinel_url)
 
             st.markdown("<div class='tip-box'>Not what you were looking for? Go to <strong>Add Entry</strong> to save new information for this property.</div>", unsafe_allow_html=True)
 
