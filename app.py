@@ -853,11 +853,7 @@ def search_kb(query: str) -> str:
             candidates.append(sr)
     candidates = candidates[:60]
 
-    # Check if any property NAMES match the query (even without answers)
-    matched_props = [r for r in without_answers
-                     if score_row(r) >= 2][:5]
-
-    # Step 1: try to find an answer
+    # Step 1: try to find an answer from properties with Q&A
     if candidates:
         prompt = f"""You are an intelligent assistant for a vacation rental company called VacayHome.
 A team member asked: "{query}"
@@ -886,9 +882,17 @@ RESPONSE FORMAT:
         if "NO_ANSWER" not in result and "NOT_FOUND" not in result:
             return result
 
-    # Step 2: property is registered but no answer yet
-    if matched_props:
-        prop = matched_props[0]
+    # Step 2: If AI couldn't answer, return the highest-scoring property
+    # Use the FULL sorted list (not just without_answers) so we get the best match
+    # even if that property has Q&A about other topics
+    best_match = None
+    for r in scored:
+        if score_row(r) >= 2:  # Must have some relevance
+            best_match = r
+            break
+    
+    if best_match:
+        prop = best_match
         pname  = prop.get("property_name","") or ""
         sup    = prop.get("supplier_name","")  or ""
         vhc    = prop.get("vhc_id","")         or ""
@@ -1010,26 +1014,86 @@ with tab_search:
             slnk     = parts[4] if len(parts) > 4 else ""
             senlnk   = parts[5] if len(parts) > 5 else ""
             st.warning(f"🔍  **{pname}** is in your knowledge base but we don't have the answer to this specific question yet.")
-            sup_lookup_s = {s["name"]: s.get("website","") or "" for s in get_suppliers()}
-            sup_main = sup_lookup_s.get(sup,"")
             
-            # Validate URLs before displaying links
-            valid_links = []
-            if sup_main and str(sup_main).strip() and sup_main.startswith("http"):
-                valid_links.append((sup_main, "<b><u>Supplier Website</u></b>"))
-            if slnk and str(slnk).strip() and slnk != "None" and slnk.startswith("http"):
-                valid_links.append((slnk, "🔗 Property page"))
-            if senlnk and str(senlnk).strip() and senlnk != "None" and senlnk.startswith("http"):
-                valid_links.append((senlnk, "🔗 Sentinel"))
+            # Make property card clickable/expandable
+            expand_key = f"property_expand_{vhc}"
+            if expand_key not in st.session_state:
+                st.session_state[expand_key] = False
             
-            links_html = ""
-            if valid_links:
-                links_html = "<div style='margin-top:10px;'>" + "".join([
-                    f"<a href='{url}' target='_blank' style='font-size:12px;margin-right:16px;color:#5a9e8f;text-decoration:underline;'>{label}</a>"
-                    for url, label in valid_links
-                ]) + "</div>"
+            if st.button(f"🏠 {pname} — Click to view all Q&A", key=f"prop_btn_{vhc}", use_container_width=True):
+                st.session_state[expand_key] = not st.session_state[expand_key]
+                st.rerun()
             
-            st.markdown(f"""
+            if st.session_state[expand_key]:
+                # Fetch ALL Q&A for this property
+                all_qa = supabase.table("knowledge_base").select("*").or_(
+                    f"vhc_id.eq.{vhc},property_name.ilike.%{pname}%"
+                ).execute().data or []
+                
+                sup_lookup_s = {s["name"]: s.get("website","") or "" for s in get_suppliers()}
+                sup_main = sup_lookup_s.get(sup,"")
+                
+                # Validate URLs before displaying links
+                valid_links = []
+                if sup_main and str(sup_main).strip() and sup_main.startswith("http"):
+                    valid_links.append((sup_main, "<b><u>Supplier Website</u></b>"))
+                if slnk and str(slnk).strip() and slnk != "None" and slnk.startswith("http"):
+                    valid_links.append((slnk, "🔗 Property page"))
+                if senlnk and str(senlnk).strip() and senlnk != "None" and senlnk.startswith("http"):
+                    valid_links.append((senlnk, "🔗 Sentinel"))
+                
+                links_html = ""
+                if valid_links:
+                    links_html = "<div style='margin-top:10px;'>" + "".join([
+                        f"<a href='{url}' target='_blank' style='font-size:12px;margin-right:16px;color:#5a9e8f;text-decoration:underline;'>{label}</a>"
+                        for url, label in valid_links
+                    ]) + "</div>"
+                
+                st.markdown(f"""
+<div style='background:#f0f4fb;border-left:4px solid #1956d2;border-radius:0 4px 4px 0;padding:14px 18px;margin:8px 0;border:1px solid #e0e0e0;'>
+<div style='font-size:15px;font-weight:600;margin-bottom:8px;color:#1956d2;'>🏠 {pname}</div>
+<div style='font-size:13px;color:#666;margin-bottom:10px;'>
+{"Supplier: "+sup+" &nbsp;·&nbsp; " if sup else ""}{"VHC: "+vhc if vhc else ""}
+</div>
+{links_html}
+</div>
+""", unsafe_allow_html=True)
+                
+                st.markdown(f"**Found {len(all_qa)} Q&A entries for this property:**")
+                
+                if all_qa:
+                    for qa in all_qa:
+                        q_text = qa.get("question","") or "(No question)"
+                        a_text = qa.get("answer","") or "(No answer)"
+                        cat = qa.get("question_category","") or "Other"
+                        
+                        with st.expander(f"**{cat}:** {q_text[:60]}..."):
+                            st.markdown(f"**Question:** {q_text}")
+                            st.markdown(f"**Answer:** {a_text}")
+                            st.caption(f"Added by: {qa.get('added_by','')} | Source: {qa.get('source','')}")
+                else:
+                    st.info("No Q&A saved for this property yet. Add one using **Add Entry** tab.")
+            else:
+                sup_lookup_s = {s["name"]: s.get("website","") or "" for s in get_suppliers()}
+                sup_main = sup_lookup_s.get(sup,"")
+                
+                # Validate URLs before displaying links
+                valid_links = []
+                if sup_main and str(sup_main).strip() and sup_main.startswith("http"):
+                    valid_links.append((sup_main, "<b><u>Supplier Website</u></b>"))
+                if slnk and str(slnk).strip() and slnk != "None" and slnk.startswith("http"):
+                    valid_links.append((slnk, "🔗 Property page"))
+                if senlnk and str(senlnk).strip() and senlnk != "None" and senlnk.startswith("http"):
+                    valid_links.append((senlnk, "🔗 Sentinel"))
+                
+                links_html = ""
+                if valid_links:
+                    links_html = "<div style='margin-top:10px;'>" + "".join([
+                        f"<a href='{url}' target='_blank' style='font-size:12px;margin-right:16px;color:#5a9e8f;text-decoration:underline;'>{label}</a>"
+                        for url, label in valid_links
+                    ]) + "</div>"
+                
+                st.markdown(f"""
 <div style='background:#f0f4fb;border-left:4px solid #1956d2;border-radius:0 4px 4px 0;padding:14px 18px;margin:8px 0;border:1px solid #e0e0e0;'>
 <div style='font-size:15px;font-weight:600;margin-bottom:8px;color:#1956d2;'>🏠 {pname}</div>
 <div style='font-size:13px;color:#666;margin-bottom:10px;'>
@@ -1040,7 +1104,7 @@ You can contact the supplier to find out, then save the answer using <b>Add Entr
 {links_html}
 </div>
 """, unsafe_allow_html=True)
-            st.markdown("<div class='tip-box'>Once you get the answer, go to <strong>Add Entry → Unit Question</strong> to save it permanently.</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='tip-box'>Once you get the answer, go to <strong>Add Entry → Unit Question</strong> to save it permanently.<br><br>💡 <strong>To view all Q&A for this property:</strong> Go to <strong>View / Edit All</strong> tab → Search box: type the VHC ID <code>{vhc}</code> or property name to filter.</div>", unsafe_allow_html=True)
 
         elif "NOT_FOUND" not in result:
             # Parse META footer if present
